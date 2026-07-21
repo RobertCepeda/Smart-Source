@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:github": "tsc -b && vite build --mode github && node scripts/after-github-build.cjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

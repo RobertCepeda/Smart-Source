@@ -25,7 +25,7 @@ export function SmartSourceLogo({
   size = "md",
   tone = "dark",
 }: SmartSourceLogoProps) {
-  const src = showText ? "/brand/smart-source-logo.png" : "/brand/smart-source-mark.png";
+  const src = `${import.meta.env.BASE_URL}brand/${showText ? "smart-source-logo.png" : "smart-source-mark.png"}`;
   const imageClassName = showText ? fullLogoSize[size] : markSize[size];
 
   return (

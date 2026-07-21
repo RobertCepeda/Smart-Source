@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { AuthUser } from "../services/api";
-import { loginRequest, meRequest, registerRequest, updateProfileRequest } from "../services/api";
+import { DEMO_TOKEN, DEMO_USER, isDemoMode, loginRequest, meRequest, registerRequest, updateProfileRequest } from "../services/api";
 
 type LoginInput = {
   email: string;
@@ -46,18 +46,26 @@ function readStoredUser() {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
-  const [user, setUser] = useState<AuthUser | null>(() => readStoredUser());
-  const [isLoading, setLoading] = useState(Boolean(token));
+  const [token, setToken] = useState<string | null>(() => (isDemoMode ? DEMO_TOKEN : localStorage.getItem(TOKEN_KEY)));
+  const [user, setUser] = useState<AuthUser | null>(() => (isDemoMode ? DEMO_USER : readStoredUser()));
+  const [isLoading, setLoading] = useState(() => !isDemoMode && Boolean(token));
 
   const storeSession = useCallback((nextToken: string, nextUser: AuthUser) => {
-    localStorage.setItem(TOKEN_KEY, nextToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+    if (!isDemoMode) {
+      localStorage.setItem(TOKEN_KEY, nextToken);
+      localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+    }
     setToken(nextToken);
     setUser(nextUser);
   }, []);
 
   const logout = useCallback(() => {
+    if (isDemoMode) {
+      setToken(DEMO_TOKEN);
+      setUser(DEMO_USER);
+      return;
+    }
+
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     setToken(null);
@@ -65,6 +73,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setLoading(false);
+      return;
+    }
+
     let isMounted = true;
 
     async function verifySession() {

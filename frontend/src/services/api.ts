@@ -1,3 +1,9 @@
+import { demoApi, demoToken, demoUser } from "./demoApi";
+
+export const isDemoMode = import.meta.env.MODE === "github" || import.meta.env.VITE_DEMO_MODE === "true";
+export const DEMO_TOKEN = demoToken;
+export const DEMO_USER = demoUser;
+
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
 
 export type HealthResponse = {
@@ -444,6 +450,10 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 export async function getHealth(): Promise<HealthResponse> {
+  if (isDemoMode) {
+    return demoApi.getHealth();
+  }
+
   const response = await fetch(`${API_BASE_URL}/health`);
 
   if (!response.ok) {
@@ -454,6 +464,10 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 export async function loginRequest(payload: LoginPayload): Promise<AuthResponse> {
+  if (isDemoMode) {
+    return demoApi.login();
+  }
+
   return apiRequest<AuthResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -461,6 +475,10 @@ export async function loginRequest(payload: LoginPayload): Promise<AuthResponse>
 }
 
 export async function registerRequest(payload: RegisterPayload): Promise<AuthResponse> {
+  if (isDemoMode) {
+    return demoApi.register();
+  }
+
   return apiRequest<AuthResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -468,6 +486,10 @@ export async function registerRequest(payload: RegisterPayload): Promise<AuthRes
 }
 
 export async function meRequest(token: string): Promise<{ user: AuthUser }> {
+  if (isDemoMode) {
+    return demoApi.me();
+  }
+
   return apiRequest<{ user: AuthUser }>("/auth/me", {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -479,6 +501,10 @@ export async function updateProfileRequest(
   token: string,
   payload: { name?: string; company?: string; avatarUrl?: string },
 ) {
+  if (isDemoMode) {
+    return demoApi.updateProfile(payload);
+  }
+
   return apiRequest<{ user: AuthUser }>("/auth/profile", {
     method: "PUT",
     headers: authHeaders(token),
@@ -506,18 +532,30 @@ function queryString(filters: Record<string, string | undefined>) {
 }
 
 export async function listSuppliersRequest(token: string, filters: SupplierFilters = {}) {
+  if (isDemoMode) {
+    return demoApi.listSuppliers(filters);
+  }
+
   return apiRequest<{ suppliers: Supplier[] }>(`/suppliers${queryString(filters)}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function getSupplierRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.getSupplier(id);
+  }
+
   return apiRequest<{ supplier: Supplier }>(`/suppliers/${id}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function createSupplierRequest(token: string, payload: SupplierPayload) {
+  if (isDemoMode) {
+    return demoApi.createSupplier(payload);
+  }
+
   return apiRequest<{ supplier: Supplier }>("/suppliers", {
     method: "POST",
     headers: authHeaders(token),
@@ -526,6 +564,10 @@ export async function createSupplierRequest(token: string, payload: SupplierPayl
 }
 
 export async function updateSupplierRequest(token: string, id: string, payload: SupplierPayload) {
+  if (isDemoMode) {
+    return demoApi.updateSupplier(id, payload);
+  }
+
   return apiRequest<{ supplier: Supplier }>(`/suppliers/${id}`, {
     method: "PUT",
     headers: authHeaders(token),
@@ -534,6 +576,11 @@ export async function updateSupplierRequest(token: string, id: string, payload: 
 }
 
 export async function deleteSupplierRequest(token: string, id: string) {
+  if (isDemoMode) {
+    await demoApi.deleteSupplier(id);
+    return;
+  }
+
   const response = await fetch(`${API_BASE_URL}/suppliers/${id}`, {
     method: "DELETE",
     headers: authHeaders(token),
@@ -546,18 +593,30 @@ export async function deleteSupplierRequest(token: string, id: string) {
 }
 
 export async function listCatalogItemsRequest(token: string, filters: CatalogFilters = {}) {
+  if (isDemoMode) {
+    return demoApi.listCatalogItems(filters);
+  }
+
   return apiRequest<{ items: CatalogItem[] }>(`/items${queryString(filters)}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function getCatalogItemDetailRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.getCatalogItemDetail(id);
+  }
+
   return apiRequest<CatalogItemDetailResponse>(`/items/${id}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function createCatalogItemRequest(token: string, payload: CatalogItemPayload) {
+  if (isDemoMode) {
+    return demoApi.createCatalogItem(payload);
+  }
+
   return apiRequest<{ item: CatalogItem }>("/items", {
     method: "POST",
     headers: authHeaders(token),
@@ -566,6 +625,10 @@ export async function createCatalogItemRequest(token: string, payload: CatalogIt
 }
 
 export async function updateCatalogItemRequest(token: string, id: string, payload: CatalogItemPayload) {
+  if (isDemoMode) {
+    return demoApi.updateCatalogItem(id, payload);
+  }
+
   return apiRequest<{ item: CatalogItem }>(`/items/${id}`, {
     method: "PUT",
     headers: authHeaders(token),
@@ -574,6 +637,11 @@ export async function updateCatalogItemRequest(token: string, id: string, payloa
 }
 
 export async function deleteCatalogItemRequest(token: string, id: string) {
+  if (isDemoMode) {
+    await demoApi.deleteCatalogItem(id);
+    return;
+  }
+
   const response = await fetch(`${API_BASE_URL}/items/${id}`, {
     method: "DELETE",
     headers: authHeaders(token),
@@ -586,12 +654,20 @@ export async function deleteCatalogItemRequest(token: string, id: string) {
 }
 
 export async function listCategoriesRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listCategories();
+  }
+
   return apiRequest<{ categories: CatalogEntity[] }>("/categories", {
     headers: authHeaders(token),
   });
 }
 
 export async function createCategoryRequest(token: string, name: string) {
+  if (isDemoMode) {
+    return demoApi.createCategory(name);
+  }
+
   return apiRequest<{ category: CatalogEntity }>("/categories", {
     method: "POST",
     headers: authHeaders(token),
@@ -600,12 +676,20 @@ export async function createCategoryRequest(token: string, name: string) {
 }
 
 export async function listBrandsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listBrands();
+  }
+
   return apiRequest<{ brands: CatalogEntity[] }>("/brands", {
     headers: authHeaders(token),
   });
 }
 
 export async function createBrandRequest(token: string, name: string) {
+  if (isDemoMode) {
+    return demoApi.createBrand(name);
+  }
+
   return apiRequest<{ brand: CatalogEntity }>("/brands", {
     method: "POST",
     headers: authHeaders(token),
@@ -614,12 +698,20 @@ export async function createBrandRequest(token: string, name: string) {
 }
 
 export async function listSupportTicketsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listSupportTickets();
+  }
+
   return apiRequest<{ tickets: SupportTicket[] }>("/support/tickets", {
     headers: authHeaders(token),
   });
 }
 
 export async function smartSearchRequest(token: string, query: string) {
+  if (isDemoMode) {
+    return demoApi.smartSearch(query);
+  }
+
   return apiRequest<SmartSearchResponse>(`/search${queryString({ q: query })}`, {
     headers: authHeaders(token),
   });
@@ -629,12 +721,20 @@ export async function listPurchaseOrdersRequest(
   token: string,
   filters: PurchaseOrderFilters = {},
 ) {
+  if (isDemoMode) {
+    return demoApi.listPurchaseOrders(filters);
+  }
+
   return apiRequest<{ orders: PurchaseOrder[] }>(`/purchase-orders${queryString(filters)}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function createPurchaseOrderRequest(token: string, payload: PurchaseOrderPayload) {
+  if (isDemoMode) {
+    return demoApi.createPurchaseOrder(payload);
+  }
+
   return apiRequest<{ order: PurchaseOrder }>("/purchase-orders", {
     method: "POST",
     headers: authHeaders(token),
@@ -647,6 +747,10 @@ export async function updatePurchaseOrderStatusRequest(
   id: string,
   status: PurchaseOrderStatus,
 ) {
+  if (isDemoMode) {
+    return demoApi.updatePurchaseOrderStatus(id, status);
+  }
+
   return apiRequest<{ order: PurchaseOrder }>(`/purchase-orders/${id}/status`, {
     method: "PUT",
     headers: authHeaders(token),
@@ -658,24 +762,40 @@ export async function getPriceHistoryRequest(
   token: string,
   filters: { itemId?: string; supplierId?: string } = {},
 ) {
+  if (isDemoMode) {
+    return demoApi.getPriceHistory(filters);
+  }
+
   return apiRequest<PriceHistoryResponse>(`/price-history${queryString(filters)}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function getReportsSummaryRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.getReportsSummary();
+  }
+
   return apiRequest<ReportsSummaryResponse>("/reports/summary", {
     headers: authHeaders(token),
   });
 }
 
 export async function listAiDocumentsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listAiDocuments();
+  }
+
   return apiRequest<{ documents: AiDocumentSummary[] }>("/ai-consult/documents", {
     headers: authHeaders(token),
   });
 }
 
 export async function uploadAiDocumentRequest(token: string, file: File) {
+  if (isDemoMode) {
+    return demoApi.uploadAiDocument(file);
+  }
+
   const formData = new FormData();
   formData.set("file", file);
 
@@ -695,12 +815,20 @@ export async function uploadAiDocumentRequest(token: string, file: File) {
 }
 
 export async function getAiDocumentRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.getAiDocument(id);
+  }
+
   return apiRequest<{ document: AiDocumentDetail }>(`/ai-consult/documents/${id}`, {
     headers: authHeaders(token),
   });
 }
 
 export async function askAiDocumentRequest(token: string, id: string, question: string) {
+  if (isDemoMode) {
+    return demoApi.askAiDocument(id, question);
+  }
+
   return apiRequest<{ answer: AiQuestionAnswer }>(`/ai-consult/documents/${id}/questions`, {
     method: "POST",
     headers: authHeaders(token),
@@ -709,6 +837,10 @@ export async function askAiDocumentRequest(token: string, id: string, question: 
 }
 
 export async function getOrganizationWorkspaceRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.getOrganizationWorkspace();
+  }
+
   return apiRequest<OrganizationWorkspaceResponse>("/organizations", {
     headers: authHeaders(token),
   });
@@ -718,6 +850,10 @@ export async function createSupportTicketRequest(
   token: string,
   payload: { subject: string; category: string; priority: string; message: string },
 ) {
+  if (isDemoMode) {
+    return demoApi.createSupportTicket(payload);
+  }
+
   return apiRequest<{ ticket: SupportTicket }>("/support/tickets", {
     method: "POST",
     headers: authHeaders(token),
@@ -726,18 +862,30 @@ export async function createSupportTicketRequest(
 }
 
 export async function getAdminOverviewRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.getAdminOverview();
+  }
+
   return apiRequest<{ overview: AdminOverview }>("/admin/overview", {
     headers: authHeaders(token),
   });
 }
 
 export async function listAdminOrganizationsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listAdminOrganizations();
+  }
+
   return apiRequest<{ organizations: Array<{ id: string; name: string; plan: string; accountType: string; _count: { users: number; suppliers: number; supportTickets: number } }> }>("/admin/organizations", {
     headers: authHeaders(token),
   });
 }
 
 export async function listAdminSupportTicketsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listAdminSupportTickets();
+  }
+
   return apiRequest<{ tickets: SupportTicket[] }>("/admin/support-tickets", {
     headers: authHeaders(token),
   });
