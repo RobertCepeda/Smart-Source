@@ -10,6 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   askAiChatRequest,
   createAiChatRequest,
+  deleteAiChatRequest,
   deleteAiDocumentRequest,
   getAiChatRequest,
   listAiChatsRequest,
@@ -98,6 +99,21 @@ export function AiConsult() {
     },
     onError: (error) => {
       setNotice(error instanceof Error ? error.message : "No pude eliminar ese documento.");
+    },
+  });
+
+  const deleteChatMutation = useMutation({
+    mutationFn: (chatId: string) => deleteAiChatRequest(token!, chatId),
+    onSuccess: async ({ chat }) => {
+      setSelectedChatId((current) =>
+        current === chat.id ? (chats.find((entry) => entry.id !== chat.id)?.id ?? null) : current,
+      );
+
+      queryClient.removeQueries({ queryKey: ["ai-chat", chat.id] });
+      await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
+    },
+    onError: (error) => {
+      setNotice(error instanceof Error ? error.message : "No pude eliminar ese chat.");
     },
   });
 
@@ -255,7 +271,9 @@ export function AiConsult() {
                     key={chat.id}
                     chat={chat}
                     isActive={chat.id === selectedChatId}
+                    isDeleting={deleteChatMutation.isPending && deleteChatMutation.variables === chat.id}
                     onClick={() => setSelectedChatId(chat.id)}
+                    onDelete={() => deleteChatMutation.mutate(chat.id)}
                   />
                 ))}
               </div>
@@ -379,16 +397,48 @@ function buildMessages(questions: AiQuestionAnswer[], pendingQuestion: string | 
   return history;
 }
 
-function ChatButton({ chat, isActive, onClick }: { chat: AiChatSummary; isActive: boolean; onClick: () => void }) {
+function ChatButton({
+  chat,
+  isActive,
+  isDeleting,
+  onClick,
+  onDelete,
+}: {
+  chat: AiChatSummary;
+  isActive: boolean;
+  isDeleting: boolean;
+  onClick: () => void;
+  onDelete: () => void;
+}) {
   return (
     <button
       type="button"
       className={cn(
-        "w-full rounded-lg border p-2.5 text-left transition",
+        "group relative w-full rounded-lg border p-2.5 pr-8 text-left transition",
         isActive ? "border-brand-200 bg-brand-50 text-brand-900" : "border-border bg-white hover:bg-slate-50",
       )}
       onClick={onClick}
     >
+      <span
+        role="button"
+        tabIndex={0}
+        className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
+        title="Eliminar chat"
+        aria-label={`Eliminar ${chat.title}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.stopPropagation();
+            onDelete();
+          }
+        }}
+      >
+        {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+      </span>
       <div className="flex items-start gap-2">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-700">
           <Bot className="h-4 w-4" />

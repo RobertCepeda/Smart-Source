@@ -839,6 +839,17 @@ export async function getAiChatRequest(token: string, id: string) {
   });
 }
 
+export async function deleteAiChatRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.deleteAiChat(id);
+  }
+
+  return apiRequest<{ chat: { id: string } }>(`/ai-consult/chats/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+}
+
 export async function uploadAiDocumentRequest(token: string, file: File) {
   if (isDemoMode) {
     return demoApi.uploadAiDocument(file);

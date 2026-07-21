@@ -516,6 +516,12 @@ export const demoApi = {
     return ok({ chat });
   },
   getAiChat: (id: string) => ok({ chat: toAiChatDetail(aiChats.find((chat) => chat.id === id) ?? aiChats[0]) }),
+  deleteAiChat: (id: string) => {
+    aiChats = aiChats.filter((chat) => chat.id !== id);
+    aiDocuments = aiDocuments.filter((document) => document.chatId !== id);
+    delete aiChatQuestions[id];
+    return ok({ chat: { id } });
+  },
   uploadAiDocument: async (file: File) => {
     const text = await file.text().catch(() => "");
     const rowCount = Math.max(0, text.split(/\r?\n/).filter(Boolean).length - 1);

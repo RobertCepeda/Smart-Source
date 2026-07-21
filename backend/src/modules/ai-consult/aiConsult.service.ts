@@ -378,6 +378,18 @@ export async function getAiChat(organizationId: string, chatId: string) {
   };
 }
 
+export async function deleteAiChat(organizationId: string, chatId: string) {
+  await ensureAiChat(organizationId, chatId);
+
+  await prisma.$transaction([
+    prisma.aiQuestion.deleteMany({ where: { chatId } }),
+    prisma.aiDocument.deleteMany({ where: { organizationId, chatId } }),
+    prisma.aiChat.delete({ where: { id: chatId } }),
+  ]);
+
+  return { id: chatId };
+}
+
 export async function uploadAiChatDocument(
   organizationId: string,
   chatId: string,
