@@ -503,11 +503,11 @@ export const demoApi = {
   },
   getAiDocument: (id: string) => ok({ document: aiDocuments.find((document) => document.id === id) ?? aiDocuments[0] }),
   askAiDocument: (id: string, question: string) => {
-    const document = aiDocuments.find((entry) => entry.id === id) ?? aiDocuments[0];
+    const document = id === "all" ? aiDocuments[0] : aiDocuments.find((entry) => entry.id === id) ?? aiDocuments[0];
     const answer: AiQuestionAnswer = {
       id: `ai_q_${Date.now()}`,
       question,
-      answer: answerDocumentQuestion(document, question),
+      answer: id === "all" ? answerWorkspaceQuestion(question) : answerDocumentQuestion(document, question),
       createdAt: new Date().toISOString(),
     };
     document.questions = [answer, ...document.questions];
@@ -857,6 +857,20 @@ function answerDocumentQuestion(document: AiDocumentDetail, question: string) {
   }
 
   return `Encontré esta información relacionada en el documento:\n${text.slice(0, 500)}`;
+}
+
+function answerWorkspaceQuestion(question: string) {
+  if (/barat|precio|cotiz|vende|vendiendo|manzana/i.test(question)) {
+    return [
+      'La opción más barata para "Manzana roja" es Mercado Norte: DOP 48.50.',
+      "1. Mercado Norte - Manzana roja - DOP 48.50 - cotizacion-mercado-norte.pdf",
+      "2. Agro Caribe - Manzana - DOP 51.00 - cotizacion-agro-caribe.pdf",
+      "3. Frutas Premium - Manzana roja importada - DOP 57.25 - cotizacion-frutas-premium.pdf",
+      'Guardé estas equivalencias para futuras consultas: "manzana roja" = "manzana", "manzana roja importada" = "manzana".',
+    ].join("\n\n");
+  }
+
+  return "Revisé todos los documentos demo. Puedes preguntar, por ejemplo: ¿quién vende más barato la manzana?";
 }
 
 function ok<T>(value: T) {

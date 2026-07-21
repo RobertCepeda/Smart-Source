@@ -12,9 +12,11 @@ import {
   Link2,
   Mail,
   MonitorCog,
+  Moon,
   Save,
   ShieldCheck,
   SlidersHorizontal,
+  Sun,
   UserRound,
 } from "lucide-react";
 import { UserAvatar } from "../components/shared/UserAvatar";
@@ -30,12 +32,13 @@ type Preferences = {
   density: "compacta" | "comoda";
   language: "es" | "en";
   currency: "DOP" | "USD" | "EUR";
+  appearance: "light" | "dark";
   emailAlerts: boolean;
   maintenanceAlerts: boolean;
   productUpdates: boolean;
 };
 
-type SettingsModule = "profile" | "organization" | "preferences" | "notifications" | "security" | "integrations";
+type SettingsModule = "profile" | "organization" | "preferences" | "display" | "notifications" | "security" | "integrations";
 
 const PREFERENCES_KEY = "smart_source_preferences";
 
@@ -43,6 +46,7 @@ const defaultPreferences: Preferences = {
   density: "compacta",
   language: "es",
   currency: "DOP",
+  appearance: "light",
   emailAlerts: true,
   maintenanceAlerts: true,
   productUpdates: false,
@@ -71,6 +75,12 @@ const settingsModules: Array<{
     label: "Preferencias",
     description: "Idioma, moneda y densidad",
     icon: SlidersHorizontal,
+  },
+  {
+    id: "display",
+    label: "Pantalla",
+    description: "Tema claro u oscuro",
+    icon: MonitorCog,
   },
   {
     id: "notifications",
@@ -126,6 +136,10 @@ export function Settings() {
       avatarUrl: user?.avatarUrl ?? "",
     });
   }, [user?.avatarUrl, user?.company, user?.name]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = preferences.appearance;
+  }, [preferences.appearance]);
 
   async function onSaveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -202,6 +216,10 @@ export function Settings() {
 
           {activeModule === "preferences" ? (
             <PreferencesPanel preferences={preferences} setPreference={setPreference} />
+          ) : null}
+
+          {activeModule === "display" ? (
+            <DisplayPanel preferences={preferences} setPreference={setPreference} />
           ) : null}
 
           {activeModule === "notifications" ? (
@@ -432,7 +450,7 @@ function PreferencesPanel({
             onChange={(event) => setPreference("density", event.target.value as Preferences["density"])}
           >
             <option value="compacta">Compacta</option>
-            <option value="comoda">Comoda</option>
+            <option value="comoda">Cómoda</option>
           </select>
         </Field>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -457,6 +475,51 @@ function PreferencesPanel({
               <option value="EUR">EUR</option>
             </select>
           </Field>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DisplayPanel({
+  preferences,
+  setPreference,
+}: {
+  preferences: Preferences;
+  setPreference: <K extends keyof Preferences>(key: K, value: Preferences[K]) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="px-3 py-2.5">
+        <h2 className="text-sm font-bold text-ink">Pantalla</h2>
+      </CardHeader>
+      <CardContent className="max-w-3xl space-y-3 p-3">
+        <Field label="Tema">
+          <select
+            className={controlClassName}
+            value={preferences.appearance}
+            onChange={(event) => setPreference("appearance", event.target.value as Preferences["appearance"])}
+          >
+            <option value="light">Claro</option>
+            <option value="dark">Oscuro</option>
+          </select>
+        </Field>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ThemeOption
+            icon={Sun}
+            title="Claro"
+            description="Fondo limpio para trabajo diario."
+            active={preferences.appearance === "light"}
+            onClick={() => setPreference("appearance", "light")}
+          />
+          <ThemeOption
+            icon={Moon}
+            title="Oscuro"
+            description="Menos brillo para sesiones largas."
+            active={preferences.appearance === "dark"}
+            onClick={() => setPreference("appearance", "dark")}
+          />
         </div>
       </CardContent>
     </Card>
@@ -576,6 +639,39 @@ function MiniStat({ label, value }: { label: string; value: number }) {
       <p className="text-[11px] font-semibold text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-bold text-ink">{value}</p>
     </div>
+  );
+}
+
+function ThemeOption({
+  icon: Icon,
+  title,
+  description,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex items-center gap-3 rounded-lg border p-3 text-left transition",
+        active ? "border-brand-200 bg-brand-50 text-brand-900" : "border-border bg-white hover:bg-slate-50",
+      )}
+      onClick={onClick}
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-brand-700">
+        <Icon className="h-4 w-4" />
+      </span>
+      <span>
+        <span className="block text-xs font-bold text-ink">{title}</span>
+        <span className="mt-0.5 block text-[11px] text-slate-500">{description}</span>
+      </span>
+    </button>
   );
 }
 

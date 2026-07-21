@@ -3,7 +3,7 @@ import multer from "multer";
 import { authenticate } from "../auth/auth.middleware";
 import { validate } from "../../middlewares/validate";
 import { aiDocumentParamsSchema, askAiDocumentSchema } from "./aiConsult.schema";
-import { askAiDocument, createAiDocument, getAiDocument, listAiDocuments } from "./aiConsult.service";
+import { askAiDocument, askAiWorkspace, createAiDocument, getAiDocument, listAiDocuments } from "./aiConsult.service";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -50,6 +50,16 @@ aiConsultRouter.get("/documents/:id", validate({ params: aiDocumentParamsSchema 
   try {
     const { id } = aiDocumentParamsSchema.parse(req.params);
     res.json({ document: await getAiDocument(organizationId(req), id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiConsultRouter.post("/questions", validate({ body: askAiDocumentSchema }), async (req, res, next) => {
+  try {
+    const { question } = askAiDocumentSchema.parse(req.body);
+    const answer = await askAiWorkspace(organizationId(req), req.user?.id ?? null, question);
+    res.status(201).json({ answer });
   } catch (error) {
     next(error);
   }

@@ -824,12 +824,14 @@ export async function getAiDocumentRequest(token: string, id: string) {
   });
 }
 
-export async function askAiDocumentRequest(token: string, id: string, question: string) {
+export async function askAiDocumentRequest(token: string, id: string | null, question: string) {
   if (isDemoMode) {
-    return demoApi.askAiDocument(id, question);
+    return demoApi.askAiDocument(id ?? "all", question);
   }
 
-  return apiRequest<{ answer: AiQuestionAnswer }>(`/ai-consult/documents/${id}/questions`, {
+  const path = id ? `/ai-consult/documents/${id}/questions` : "/ai-consult/questions";
+
+  return apiRequest<{ answer: AiQuestionAnswer }>(path, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ question }),

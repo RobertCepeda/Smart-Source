@@ -1,18 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LucideIcon } from "lucide-react";
-import {
-  Bot,
-  BrainCircuit,
-  CheckCircle2,
-  Clock3,
-  Database,
-  FileText,
-  Loader2,
-  MessageSquare,
-  Send,
-  Upload,
-} from "lucide-react";
+import { Bot, CheckCircle2, FileText, Layers3, Loader2, Paperclip, Send, Sparkles, Upload } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -20,7 +8,6 @@ import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { useAuth } from "../contexts/AuthContext";
 import {
   askAiDocumentRequest,
-  getAiDocumentRequest,
   listAiDocumentsRequest,
   uploadAiDocumentRequest,
   type AiDocumentSummary,
@@ -29,6 +16,13 @@ import { cn } from "../lib/utils";
 
 const acceptedFileTypes = ".csv,.xlsx,.xls,.pdf,.json,.txt,.docx";
 
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
+};
+
 export function AiConsult() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
@@ -36,6 +30,15 @@ export function AiConsult() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      text: "Sube varias cotizaciones y pregunta algo como: ¿quién vende más barato la manzana?",
+      createdAt: new Date().toISOString(),
+    },
+  ]);
 
   const documentsQuery = useQuery({
     queryKey: ["ai-documents"],
@@ -44,97 +47,118 @@ export function AiConsult() {
   });
 
   const documents = useMemo(() => documentsQuery.data?.documents ?? [], [documentsQuery.data?.documents]);
-
-  useEffect(() => {
-    if (!selectedDocumentId && documents.length) {
-      setSelectedDocumentId(documents[0].id);
-    }
-  }, [documents, selectedDocumentId]);
-
   const selectedDocument = documents.find((document) => document.id === selectedDocumentId) ?? null;
-  const detailQuery = useQuery({
-    queryKey: ["ai-document", selectedDocumentId],
-    queryFn: () => getAiDocumentRequest(token!, selectedDocumentId!),
-    enabled: Boolean(token && selectedDocumentId),
-  });
-
-  const documentDetail = detailQuery.data?.document;
-  const latestQuestions = documentDetail?.questions ?? [];
-  const totalQuestions = useMemo(
-    () => documents.reduce((total, document) => total + document.questionCount, 0),
-    [documents],
-  );
-
-  const uploadMutation = useMutation({
-    mutationFn: (file: File) => uploadAiDocumentRequest(token!, file),
-    onSuccess: async ({ document }) => {
-      setSelectedDocumentId(document.id);
-      setNotice("Documento leído y guardado. Ya puedes hacerle preguntas.");
-      await queryClient.invalidateQueries({ queryKey: ["ai-documents"] });
-      await queryClient.invalidateQueries({ queryKey: ["ai-document", document.id] });
-    },
-    onError: (error) => {
-      setNotice(error instanceof Error ? error.message : "No pudimos importar el documento.");
-    },
-  });
+  const totalRows = documents.reduce((total, document) => total + document.rowCount, 0);
+  const totalQuestions = documents.reduce((total, document) => total + document.questionCount, 0);
 
   const askMutation = useMutation({
-    mutationFn: (nextQuestion: string) => askAiDocumentRequest(token!, selectedDocumentId!, nextQuestion),
-    onSuccess: async () => {
+    mutationFn: (nextQuestion: string) => askAiDocumentRequest(token!, selectedDocumentId, nextQuestion),
+    onSuccess: async ({ answer }) => {
       setQuestion("");
-      setNotice("Respuesta generada con la data del documento.");
-      await queryClient.invalidateQueries({ queryKey: ["ai-document", selectedDocumentId] });
+      setMessages((current) => [
+        ...current,
+        { id: answer.id, role: "assistant", text: answer.answer, createdAt: answer.createdAt },
+      ]);
       await queryClient.invalidateQueries({ queryKey: ["ai-documents"] });
     },
     onError: (error) => {
-      setNotice(error instanceof Error ? error.message : "No pudimos responder esa pregunta.");
+      setMessages((current) => [
+        ...current,
+        {
+          id: `error_${Date.now()}`,
+          role: "assistant",
+          text: error instanceof Error ? error.message : "No pude responder esa pregunta.",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
     },
   });
 
-  function uploadFile(file: File | undefined) {
-    if (!file) {
+  async function uploadFiles(fileList: FileList | File[] | null | undefined) {
+    const files = Array.from(fileList ?? []);
+
+    if (!files.length || !token) {
       return;
     }
 
     setNotice(null);
-    uploadMutation.mutate(file);
+    setIsUploading(true);
+
+    try {
+      for (const file of files) {
+        await uploadAiDocumentRequest(token, file);
+      }
+
+      setSelectedDocumentId(null);
+      setNotice(`${files.length} documento${files.length === 1 ? "" : "s"} importado${files.length === 1 ? "" : "s"}.`);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `upload_${Date.now()}`,
+          role: "assistant",
+          text: `Listo. Ya puedo comparar ${files.length} ${files.length === 1 ? "cotización" : "cotizaciones"} contra el resto del workspace.`,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ["ai-documents"] });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No pude importar esos documentos.");
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
-    uploadFile(event.target.files?.[0]);
+    void uploadFiles(event.target.files);
     event.target.value = "";
   }
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    uploadFile(event.dataTransfer.files?.[0]);
+    void uploadFiles(event.dataTransfer.files);
   }
 
   function onAsk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextQuestion = question.trim();
 
-    if (!selectedDocumentId || nextQuestion.length < 3) {
+    if (!documents.length) {
+      setNotice("Primero sube una cotización o reporte.");
+      return;
+    }
+
+    if (nextQuestion.length < 3) {
       setNotice("Escribe una pregunta un poco más completa.");
       return;
     }
 
     setNotice(null);
+    setMessages((current) => [
+      ...current,
+      { id: `user_${Date.now()}`, role: "user", text: nextQuestion, createdAt: new Date().toISOString() },
+    ]);
     askMutation.mutate(nextQuestion);
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PageHeader
         eyebrow="Compras y análisis"
         title="Consultas IA"
-        description="Importa reportes o documentos, Smart Source los lee en backend y te responde preguntas con la data encontrada."
+        description="Compara cotizaciones, encuentra mejores precios y guarda equivalencias de productos."
         actions={
           <>
-            <input ref={fileInputRef} type="file" className="hidden" accept={acceptedFileTypes} onChange={onFileChange} />
-            <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadMutation.isPending}>
-              {uploadMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-              Importar documento
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept={acceptedFileTypes}
+              onChange={onFileChange}
+            />
+            <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+              {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              Subir cotizaciones
             </Button>
           </>
         }
@@ -146,48 +170,64 @@ export function AiConsult() {
         </div>
       ) : null}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={FileText} label="Documentos" value={documents.length.toString()} detail="importados" />
-        <MetricCard icon={Database} label="Filas leídas" value={(selectedDocument?.rowCount ?? 0).toString()} detail="documento activo" />
-        <MetricCard icon={MessageSquare} label="Preguntas" value={totalQuestions.toString()} detail="historial guardado" />
-        <MetricCard icon={BrainCircuit} label="Motor" value="Local" detail="listo para pruebas" />
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]">
-        <Card className="self-start overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Archivos</p>
-              <h2 className="text-sm font-bold text-ink">Documentos leídos</h2>
-            </div>
-            <Badge tone="slate">{documents.length}</Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div
-              className="rounded-lg border border-dashed border-brand-200 bg-brand-50/60 p-3 text-center"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={onDrop}
-            >
-              <Upload className="mx-auto h-5 w-5 text-brand-700" />
-              <p className="mt-2 text-xs font-bold text-ink">Suelta un archivo o impórtalo</p>
-              <p className="mt-1 text-[11px] leading-4 text-slate-500">CSV, Excel, PDF, JSON, TXT o DOCX hasta 15 MB.</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadMutation.isPending}
+      <section className="grid gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className="space-y-3">
+          <Card>
+            <CardContent className="space-y-3 p-3">
+              <div
+                className="rounded-lg border border-dashed border-border bg-slate-50 p-3"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={onDrop}
               >
-                Seleccionar
-              </Button>
-            </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                    <Paperclip className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-ink">PDF, Excel, CSV, DOCX</p>
+                    <p className="text-[11px] text-slate-500">Puedes subir varios a la vez.</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 w-full"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Importar
+                </Button>
+              </div>
 
-            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <MiniStat label="Docs" value={documents.length} />
+                <MiniStat label="Filas" value={totalRows} />
+                <MiniStat label="Chats" value={totalQuestions} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader className="px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-ink">Cotizaciones</h2>
+                <Badge tone="slate">{documents.length}</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="max-h-[520px] space-y-2 overflow-y-auto p-2.5">
+              <ScopeButton
+                label="Todas las cotizaciones"
+                detail="Comparar workspace completo"
+                isActive={!selectedDocumentId}
+                icon={Layers3}
+                onClick={() => setSelectedDocumentId(null)}
+              />
+
               {documentsQuery.isLoading ? <EmptyState text="Cargando documentos..." /> : null}
-              {!documentsQuery.isLoading && !documents.length ? (
-                <EmptyState text="Importa un archivo para empezar a consultar." />
-              ) : null}
+              {!documentsQuery.isLoading && !documents.length ? <EmptyState text="Todavía no hay cotizaciones." /> : null}
+
               {documents.map((document) => (
                 <DocumentButton
                   key={document.id}
@@ -196,100 +236,93 @@ export function AiConsult() {
                   onClick={() => setSelectedDocumentId(document.id)}
                 />
               ))}
+            </CardContent>
+          </Card>
+        </aside>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 px-3 py-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                <Bot className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-bold text-ink">Chat de compras</h2>
+                <p className="truncate text-[11px] text-slate-500">
+                  {selectedDocument ? selectedDocument.fileName : "Consultando todas las cotizaciones"}
+                </p>
+              </div>
             </div>
+            <Badge tone="green">
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+              Backend activo
+            </Badge>
+          </CardHeader>
+
+          <CardContent className="flex min-h-[610px] flex-col p-0">
+            <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/70 p-3">
+              {messages.map((message) => (
+                <ChatBubble key={message.id} message={message} />
+              ))}
+              {askMutation.isPending ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs text-slate-600">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-700" />
+                  Analizando cotizaciones...
+                </div>
+              ) : null}
+            </div>
+
+            <form className="border-t border-border bg-white p-3" onSubmit={onAsk}>
+              <div className="flex gap-2">
+                <textarea
+                  className="min-h-[54px] flex-1 resize-none rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  placeholder="Ejemplo: ¿quién vende más barato la manzana?"
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                />
+                <Button type="submit" className="h-[54px] self-end" disabled={askMutation.isPending || !documents.length}>
+                  {askMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  Enviar
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
-
-        <div className="space-y-4">
-          {!selectedDocumentId ? (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <Bot className="mx-auto h-8 w-8 text-brand-700" />
-                <h2 className="mt-3 text-sm font-bold text-ink">Todavía no hay documento activo</h2>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Importa un archivo para ver resumen, texto leído y preguntas.</p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {selectedDocumentId && detailQuery.isLoading ? (
-            <Card>
-              <CardContent className="flex items-center gap-3 p-5 text-xs text-slate-600">
-                <Loader2 className="h-4 w-4 animate-spin text-brand-700" />
-                Cargando lectura del documento...
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {documentDetail ? (
-            <>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="truncate text-sm font-bold text-ink">{documentDetail.fileName}</h2>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formatFileSize(documentDetail.sizeBytes)} · {documentDetail.extension?.toUpperCase() || "Archivo"} ·{" "}
-                      {formatDate(documentDetail.createdAt)}
-                    </p>
-                  </div>
-                  <Badge tone="green">
-                    <CheckCircle2 className="mr-1 h-3 w-3" />
-                    Leído
-                  </Badge>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <InfoBlock title="Resumen automático" text={documentDetail.summary} />
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <MiniStat label="Hojas" value={documentDetail.sheetCount} />
-                    <MiniStat label="Filas" value={documentDetail.rowCount} />
-                    <MiniStat label="Consultas" value={documentDetail.questionCount} />
-                  </div>
-                  <InfoBlock title="Vista previa del texto leído" text={documentDetail.extractedTextPreview || "No se pudo extraer texto visible."} muted />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <h2 className="text-sm font-bold text-ink">Pregunta sobre este documento</h2>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <form className="grid gap-2 md:grid-cols-[1fr_auto]" onSubmit={onAsk}>
-                    <textarea
-                      className="min-h-[76px] w-full resize-none rounded-lg border border-border bg-white px-3 py-2 text-[13px] leading-5 text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                      placeholder="Ejemplo: ¿Cuál fue el gasto total por suplidor? ¿Qué producto aparece más caro?"
-                      value={question}
-                      onChange={(event) => setQuestion(event.target.value)}
-                    />
-                    <Button type="submit" className="self-end" disabled={askMutation.isPending || !selectedDocumentId}>
-                      {askMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                      Preguntar
-                    </Button>
-                  </form>
-
-                  <div className="space-y-2">
-                    {latestQuestions.map((entry) => (
-                      <div key={entry.id} className="rounded-lg border border-border bg-slate-50 p-3">
-                        <div className="flex items-start gap-2">
-                          <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-brand-700" />
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-ink">{entry.question}</p>
-                            <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{entry.answer}</p>
-                            <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-400">
-                              <Clock3 className="h-3 w-3" />
-                              {formatDate(entry.createdAt)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {!latestQuestions.length ? <EmptyState text="Haz la primera pregunta y el resultado quedará guardado aquí." /> : null}
-                  </div>
-                </CardContent>
-              </Card>
-            </>
-          ) : null}
-        </div>
       </section>
     </div>
+  );
+}
+
+function ScopeButton({
+  label,
+  detail,
+  isActive,
+  icon: Icon,
+  onClick,
+}: {
+  label: string;
+  detail: string;
+  isActive: boolean;
+  icon: typeof Layers3;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-center gap-2 rounded-lg border p-2.5 text-left transition",
+        isActive ? "border-brand-200 bg-brand-50 text-brand-900" : "border-border bg-white hover:bg-slate-50",
+      )}
+      onClick={onClick}
+    >
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-700">
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-bold text-ink">{label}</span>
+        <span className="block truncate text-[11px] text-slate-500">{detail}</span>
+      </span>
+    </button>
   );
 }
 
@@ -311,53 +344,51 @@ function DocumentButton({
       )}
       onClick={onClick}
     >
-      <div className="flex items-start gap-2.5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-700">
+      <div className="flex items-start gap-2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-brand-700">
           <FileText className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-xs font-bold text-ink">{document.fileName}</p>
-          <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500">{document.summary}</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-xs font-bold text-ink">{document.fileName}</span>
+          <span className="mt-1 block line-clamp-2 text-[11px] leading-4 text-slate-500">{document.summary}</span>
+          <span className="mt-2 flex flex-wrap gap-1.5">
             <Badge tone="slate">{formatFileSize(document.sizeBytes)}</Badge>
             <Badge tone="blue">{document.rowCount} filas</Badge>
-            <Badge tone="green">{document.questionCount} preguntas</Badge>
-          </div>
-        </div>
+          </span>
+        </span>
       </div>
     </button>
   );
 }
 
-function MetricCard({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: string; value: string; detail: string }) {
+function ChatBubble({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user";
+
   return (
-    <Card>
-      <CardContent className="p-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[11px] font-semibold text-slate-500">{label}</p>
-          <Icon className="h-4 w-4 text-brand-700" />
-        </div>
-        <p className="mt-2 truncate text-xl font-bold text-ink">{value}</p>
-        <p className="mt-1 text-[11px] text-slate-500">{detail}</p>
-      </CardContent>
-    </Card>
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "max-w-[820px] rounded-lg border px-3 py-2 text-xs leading-5 shadow-sm",
+          isUser ? "border-ink bg-ink text-white" : "border-border bg-white text-slate-700",
+        )}
+      >
+        {!isUser ? (
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-brand-700">
+            <Sparkles className="h-3 w-3" />
+            Smart Source
+          </p>
+        ) : null}
+        <p className="whitespace-pre-wrap">{message.text}</p>
+      </div>
+    </div>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-border p-2.5">
-      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-bold text-ink">{value}</p>
-    </div>
-  );
-}
-
-function InfoBlock({ title, text, muted = false }: { title: string; text: string; muted?: boolean }) {
-  return (
-    <div className={cn("rounded-lg border p-3", muted ? "border-border bg-slate-50" : "border-brand-100 bg-brand-50/50")}>
-      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">{title}</p>
-      <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{text}</p>
+    <div className="rounded-lg border border-border bg-white p-2">
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">{label}</p>
+      <p className="mt-1 text-base font-bold text-ink">{value}</p>
     </div>
   );
 }
@@ -376,14 +407,4 @@ function formatFileSize(size: number) {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-DO", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }

@@ -50,6 +50,7 @@ model Organization {
   items       Item[]
   supportTickets SupportTicket[]
   aiDocuments AiDocument[]
+  aiProductAliases AiProductAlias[]
 
   @@index([name])
 }
@@ -355,4 +356,20 @@ model AiQuestion {
   @@index([documentId])
   @@index([askedById])
   @@index([createdAt])
+}
+
+model AiProductAlias {
+  id             String       @id @default(cuid())
+  organizationId String
+  canonicalName  String
+  aliasName      String
+  confidence     Int          @default(80)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, aliasName])
+  @@index([organizationId])
+  @@index([canonicalName])
 }
