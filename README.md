@@ -39,7 +39,11 @@ DATABASE_URL="postgresql://usuario:password@localhost:5432/smart_source?schema=p
 PORT=4000
 CORS_ORIGIN="http://localhost:5173"
 JWT_SECRET="pon-aqui-una-clave-larga-y-segura"
+OPENAI_API_KEY=""
+OPENAI_MODEL="gpt-5.6-sol"
 ```
+
+Para activar Consultas IA con OpenAI, pega tu API key en `OPENAI_API_KEY`. Si la dejas vacía, Smart Source mantiene el analizador local de documentos.
 
 4. Crea la base de datos `smart_source` en PostgreSQL si todavía no existe.
 

@@ -3,6 +3,16 @@ import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 import * as XLSX from "xlsx";
 import type { Prisma } from "../../generated/prisma/client";
+import {
+  answerWithOpenAi,
+  createVectorStore,
+  deleteOpenAiFile,
+  deleteVectorStore,
+  deleteVectorStoreFile,
+  isOpenAiEnabled,
+  uploadFileToVectorStore,
+  uploadTextToVectorStore,
+} from "../../lib/openai";
 import { prisma } from "../../lib/prisma";
 
 type SheetData = {
@@ -324,11 +334,12 @@ export async function listAiChats(organizationId: string) {
 }
 
 export async function createAiChat(organizationId: string, createdById: string | null, title: string) {
+  const chatTitle = title.trim() || defaultChatTitle();
   const chat = await prisma.aiChat.create({
     data: {
       organizationId,
       createdById,
-      title: title.trim() || defaultChatTitle(),
+      title: chatTitle,
     },
     include: {
       _count: { select: { documents: true, questions: true } },
@@ -340,7 +351,8 @@ export async function createAiChat(organizationId: string, createdById: string |
     },
   });
 
-  return mapChat(chat);
+  const openaiVectorStoreId = await ensureOpenAiVectorStore(organizationId, chat.id, chatTitle, chat.openaiVectorStoreId);
+  return mapChat({ ...chat, openaiVectorStoreId });
 }
 
 export async function getAiChat(organizationId: string, chatId: string) {
@@ -379,13 +391,31 @@ export async function getAiChat(organizationId: string, chatId: string) {
 }
 
 export async function deleteAiChat(organizationId: string, chatId: string) {
-  await ensureAiChat(organizationId, chatId);
+  const chat = await prisma.aiChat.findFirst({
+    where: { id: chatId, organizationId },
+    select: {
+      id: true,
+      openaiVectorStoreId: true,
+      documents: { select: { openaiFileId: true } },
+    },
+  });
+
+  if (!chat) {
+    const error = new Error("Chat no encontrado.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
 
   await prisma.$transaction([
     prisma.aiQuestion.deleteMany({ where: { chatId } }),
     prisma.aiDocument.deleteMany({ where: { organizationId, chatId } }),
     prisma.aiChat.delete({ where: { id: chatId } }),
   ]);
+
+  await safeOpenAiAction("borrar archivos OpenAI del chat", async () => {
+    await Promise.all(chat.documents.map((document) => deleteOpenAiFile(document.openaiFileId)));
+  });
+  await safeOpenAiAction("borrar vector store OpenAI del chat", () => deleteVectorStore(chat.openaiVectorStoreId));
 
   return { id: chatId };
 }
@@ -396,8 +426,9 @@ export async function uploadAiChatDocument(
   uploadedById: string | null,
   file: Express.Multer.File,
 ) {
-  await ensureAiChat(organizationId, chatId);
+  const chat = await ensureAiChat(organizationId, chatId);
   const document = await createAiDocument(organizationId, uploadedById, file, chatId);
+  await syncDocumentWithOpenAi(organizationId, chatId, chat.title, document.id, file);
   await prisma.aiChat.update({ where: { id: chatId }, data: { updatedAt: new Date() } });
   return document;
 }
@@ -432,7 +463,12 @@ export async function getAiDocument(organizationId: string, id: string) {
 export async function deleteAiDocument(organizationId: string, id: string) {
   const document = await prisma.aiDocument.findFirst({
     where: { id, organizationId },
-    select: { id: true, chatId: true },
+    select: {
+      id: true,
+      chatId: true,
+      openaiFileId: true,
+      chat: { select: { openaiVectorStoreId: true } },
+    },
   });
 
   if (!document) {
@@ -461,6 +497,10 @@ export async function deleteAiDocument(organizationId: string, id: string) {
   if (document.chatId) {
     await prisma.aiChat.update({ where: { id: document.chatId }, data: { updatedAt: new Date() } });
   }
+
+  await safeOpenAiAction("borrar archivo OpenAI", () =>
+    deleteVectorStoreFile(document.chat?.openaiVectorStoreId, document.openaiFileId),
+  );
 
   return { id, chatId: document.chatId };
 }
@@ -555,6 +595,11 @@ export async function askAiChat(organizationId: string, chatId: string, askedByI
         orderBy: { createdAt: "desc" },
         take: 25,
       },
+      questions: {
+        orderBy: { createdAt: "asc" },
+        take: 40,
+        select: { question: true, answer: true },
+      },
     },
   });
 
@@ -570,16 +615,19 @@ export async function askAiChat(organizationId: string, chatId: string, askedByI
     throw error;
   }
 
-  const result = await answerAcrossDocuments(
-    organizationId,
-    chat.documents.map((document) => ({
-      id: document.id,
-      fileName: document.fileName,
-      extractedText: document.extractedText,
-      structured: document.structuredJson as unknown as StructuredDocument | null,
-    })),
-    question,
-  );
+  const openAiResult = await answerChatWithOpenAi(organizationId, chat, question);
+  const result =
+    openAiResult ??
+    (await answerAcrossDocuments(
+      organizationId,
+      chat.documents.map((document) => ({
+        id: document.id,
+        fileName: document.fileName,
+        extractedText: document.extractedText,
+        structured: document.structuredJson as unknown as StructuredDocument | null,
+      })),
+      question,
+    ));
 
   const saved = await prisma.aiQuestion.create({
     data: {
@@ -622,6 +670,7 @@ function mapDocument(document: any) {
     sheetCount: sheets.length,
     rowCount: sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0),
     questionCount: document._count?.questions ?? 0,
+    aiSynced: Boolean(document.openaiFileId),
   };
 }
 
@@ -634,13 +683,14 @@ function mapChat(chat: any) {
     documentCount: chat._count?.documents ?? 0,
     questionCount: chat._count?.questions ?? 0,
     recentFiles: (chat.documents ?? []).map((document: { fileName: string }) => document.fileName),
+    aiMode: chat.openaiVectorStoreId ? "openai" : "local",
   };
 }
 
 async function ensureAiChat(organizationId: string, chatId: string) {
   const chat = await prisma.aiChat.findFirst({
     where: { id: chatId, organizationId },
-    select: { id: true },
+    select: { id: true, title: true, openaiVectorStoreId: true },
   });
 
   if (!chat) {
@@ -648,6 +698,203 @@ async function ensureAiChat(organizationId: string, chatId: string) {
     (error as Error & { status: number }).status = 404;
     throw error;
   }
+
+  return chat;
+}
+
+async function ensureOpenAiVectorStore(
+  organizationId: string,
+  chatId: string,
+  title: string,
+  currentVectorStoreId: string | null | undefined,
+) {
+  if (!isOpenAiEnabled()) {
+    return currentVectorStoreId ?? null;
+  }
+
+  if (currentVectorStoreId) {
+    return currentVectorStoreId;
+  }
+
+  return safeOpenAiAction("crear vector store OpenAI", async () => {
+    const vectorStoreId = await createVectorStore(`Smart Source - ${title} - ${chatId}`);
+    if (!vectorStoreId) {
+      return null;
+    }
+
+    await prisma.aiChat.update({
+      where: { id: chatId },
+      data: { openaiVectorStoreId: vectorStoreId },
+    });
+
+    return vectorStoreId;
+  });
+}
+
+async function syncDocumentWithOpenAi(
+  organizationId: string,
+  chatId: string,
+  chatTitle: string,
+  documentId: string,
+  file?: Express.Multer.File,
+) {
+  if (!isOpenAiEnabled()) {
+    return null;
+  }
+
+  const document = await prisma.aiDocument.findFirst({
+    where: { id: documentId, organizationId, chatId },
+    select: {
+      id: true,
+      fileName: true,
+      summary: true,
+      extractedText: true,
+      openaiFileId: true,
+      chat: { select: { openaiVectorStoreId: true } },
+    },
+  });
+
+  if (!document || document.openaiFileId) {
+    return document?.openaiFileId ?? null;
+  }
+
+  const vectorStoreId = await ensureOpenAiVectorStore(
+    organizationId,
+    chatId,
+    chatTitle,
+    document.chat?.openaiVectorStoreId,
+  );
+
+  if (!vectorStoreId) {
+    return null;
+  }
+
+  const attributes = {
+    organizationId,
+    chatId,
+    documentId,
+    fileName: document.fileName,
+  };
+
+  const openaiFileId = await safeOpenAiAction("sincronizar documento con OpenAI", async () => {
+    if (file) {
+      try {
+        return await uploadFileToVectorStore(vectorStoreId, file, attributes);
+      } catch (error) {
+        console.warn(`Smart Source OpenAI original upload fallback: ${openAiErrorMessage(error)}`);
+      }
+    }
+
+    return uploadTextToVectorStore(vectorStoreId, readableFileName(document.fileName), document.extractedText, attributes);
+  });
+
+  if (openaiFileId) {
+    await prisma.aiDocument.update({
+      where: { id: documentId },
+      data: { openaiFileId },
+    });
+  }
+
+  return openaiFileId;
+}
+
+async function syncChatDocumentsWithOpenAi(organizationId: string, chat: {
+  id: string;
+  title: string;
+  openaiVectorStoreId: string | null;
+  documents: Array<{
+    id: string;
+    fileName: string;
+    summary: string;
+    extractedText: string;
+    openaiFileId: string | null;
+  }>;
+}) {
+  if (!isOpenAiEnabled()) {
+    return null;
+  }
+
+  const vectorStoreId = await ensureOpenAiVectorStore(organizationId, chat.id, chat.title, chat.openaiVectorStoreId);
+  if (!vectorStoreId) {
+    return null;
+  }
+
+  for (const document of chat.documents) {
+    if (!document.openaiFileId) {
+      await syncDocumentWithOpenAi(organizationId, chat.id, chat.title, document.id);
+    }
+  }
+
+  return vectorStoreId;
+}
+
+async function answerChatWithOpenAi(
+  organizationId: string,
+  chat: {
+    id: string;
+    title: string;
+    openaiVectorStoreId: string | null;
+    documents: Array<{
+      id: string;
+      fileName: string;
+      summary: string;
+      extractedText: string;
+      structuredJson: Prisma.JsonValue | null;
+      openaiFileId: string | null;
+    }>;
+    questions: Array<{ question: string; answer: string }>;
+  },
+  question: string,
+) {
+  const vectorStoreId = await syncChatDocumentsWithOpenAi(organizationId, chat);
+  if (!vectorStoreId) {
+    return null;
+  }
+
+  return safeOpenAiAction("responder con OpenAI", async () => {
+    const response = await answerWithOpenAi(
+      vectorStoreId,
+      question,
+      chat.questions.flatMap((entry) => [
+        { role: "user" as const, content: entry.question },
+        { role: "assistant" as const, content: entry.answer },
+      ]),
+      chat.documents.map((document) => ({
+        fileName: document.fileName,
+        summary: document.summary,
+      })),
+    );
+
+    if (!response) {
+      return null;
+    }
+
+    return {
+      documentId: chat.documents[0]?.id,
+      answer: response.answer,
+      context: {
+        mode: "openai-file-search",
+        provider: "openai",
+        model: response.model,
+        responseId: response.responseId,
+        vectorStoreId,
+        documentCount: chat.documents.length,
+      },
+    };
+  });
+}
+
+async function safeOpenAiAction<T>(label: string, action: () => Promise<T>) {
+  try {
+    return await action();
+  } catch (error) {
+    console.warn(`Smart Source OpenAI ${label}: ${openAiErrorMessage(error)}`);
+    return null;
+  }
+}
+
+function openAiErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function defaultChatTitle() {
