@@ -957,6 +957,10 @@ function answerDocumentQuestion(document: AiDocumentDetail, question: string) {
   const numbers = Array.from(text.matchAll(/(?:total|monto|importe)?[^\d]*(\d+(?:[.,]\d+)?)/gi)).map((match) => Number(match[1].replace(",", ".")));
   const total = numbers.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
 
+  if (/trata|resumen|contenido|que dice|de que/i.test(question)) {
+    return `Claro. El documento "${document.fileName}" trata principalmente de la información que cargaste para análisis. Puedo resumirlo, buscar datos específicos o ayudarte a comparar puntos importantes.\n\nLo primero que pude leer fue:\n${text.slice(0, 420)}`;
+  }
+
   if (/total|monto|gasto|compr/i.test(question) && total) {
     return `En esta vista demo encontré un total aproximado de ${new Intl.NumberFormat("es-DO").format(total)} en el documento.`;
   }
@@ -975,7 +979,11 @@ function answerWorkspaceQuestion(question: string) {
     ].join("\n\n");
   }
 
-  return "Sí. Revisé los documentos demo cargados en este chat. Puedes pedirme un resumen, buscar datos concretos, comparar archivos o extraer información importante.";
+  if (/trata|resumen|contenido|que dice|de que/i.test(question)) {
+    return "Claro. Este chat reúne documentos cargados para análisis. Puedo explicarte de qué trata cada archivo, sacar puntos importantes, buscar datos concretos o comparar información entre documentos.";
+  }
+
+  return "Sí, ya tengo los documentos demo cargados en este chat. Puedes pedirme un resumen, buscar datos concretos, comparar archivos o extraer información importante.";
 }
 
 function ok<T>(value: T) {

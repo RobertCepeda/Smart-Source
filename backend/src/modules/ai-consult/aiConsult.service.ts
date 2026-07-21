@@ -469,7 +469,9 @@ export async function askAiDocument(
     throw error;
   }
 
-  const result = answerFromDocument(document.extractedText, document.structuredJson as unknown as StructuredDocument | null, question);
+  const result = answerFromDocument(document.extractedText, document.structuredJson as unknown as StructuredDocument | null, question, {
+    fileName: document.fileName,
+  });
   const saved = await prisma.aiQuestion.create({
     data: {
       documentId,
@@ -644,32 +646,172 @@ function toJson(value: unknown) {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
-function answerFromDocument(text: string, structured: StructuredDocument | null, question: string) {
+function answerFromDocument(
+  text: string,
+  structured: StructuredDocument | null,
+  question: string,
+  context: { fileName?: string } = {},
+) {
   const questionTokens = tokens(question);
   const tableAnswer = answerFromTables(structured, question, questionTokens);
   const snippets = findSnippets(text, questionTokens);
-  const parts: string[] = [];
+  const normalizedQuestion = normalize(question);
+
+  if (isSummaryQuestion(normalizedQuestion)) {
+    return {
+      answer: buildFriendlySummary(text, snippets, context.fileName),
+      context: { matchedTokens: questionTokens, snippets, mode: "summary" },
+    };
+  }
 
   if (tableAnswer) {
-    parts.push(tableAnswer);
+    return {
+      answer: `Claro. Con los datos que pude leer, esto fue lo más importante:\n\n${tableAnswer}`,
+      context: { matchedTokens: questionTokens, snippets, mode: "table" },
+    };
   }
 
   if (snippets.length) {
-    parts.push(
-      `Encontré estas partes relacionadas en el documento:\n${snippets
-        .map((snippet, index) => `${index + 1}. ${snippet}`)
-        .join("\n")}`,
-    );
-  }
-
-  if (!parts.length) {
-    parts.push("No encontré una respuesta directa en el documento. Prueba preguntando por una columna, monto, suplidor, fecha o concepto específico.");
+    return {
+      answer: buildFriendlySnippetAnswer(snippets, context.fileName),
+      context: { matchedTokens: questionTokens, snippets, mode: "snippets" },
+    };
   }
 
   return {
-    answer: parts.join("\n\n"),
-    context: { matchedTokens: questionTokens, snippets },
+    answer: "No vi una respuesta directa con esa pregunta. Prueba preguntándome de otra forma, por ejemplo: “hazme un resumen”, “qué dice sobre la fecha” o “qué puntos importantes tiene”.",
+    context: { matchedTokens: questionTokens, snippets, mode: "empty" },
   };
+}
+
+function isSummaryQuestion(normalizedQuestion: string) {
+  return /\b(de que trata|trata|resumen|resume|resumeme|explica|sobre que|que dice|tema|contenido|importante|puntos clave)\b/.test(
+    normalizedQuestion,
+  );
+}
+
+function buildFriendlySummary(text: string, snippets: string[], fileName?: string) {
+  const subject = inferDocumentSubject(text, fileName);
+  const points = inferKeyPoints(text, snippets);
+  const sourceLine = fileName ? `Lo estoy tomando principalmente del archivo "${fileName}".` : null;
+  const pointLines = points.length ? `\n\nEn sencillo:\n${points.map((point) => `- ${point}`).join("\n")}` : "";
+
+  return [`Claro, ${subject}${pointLines}`, sourceLine].filter(Boolean).join("\n\n");
+}
+
+function buildFriendlySnippetAnswer(snippets: string[], fileName?: string) {
+  const cleaned = snippets.map(cleanSnippet).filter(Boolean).slice(0, 4);
+  const sourceLine = fileName ? `Lo encontré en "${fileName}".` : "Lo encontré dentro del documento.";
+
+  return [
+    `Claro, encontré información relacionada. ${sourceLine}`,
+    cleaned.length ? `\nLo más relevante es:\n${cleaned.map((snippet) => `- ${snippet}`).join("\n")}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function inferDocumentSubject(text: string, fileName?: string) {
+  const normalizedText = normalize(text);
+  const title = findDocumentTitle(text);
+  const nameHint = fileName ? readableFileName(fileName) : "este documento";
+
+  if (/carta de traslado|traslado de empleado|fecha efectiva.*traslado/.test(normalizedText)) {
+    return "la carta trata de un traslado de empleado. Es una comunicación formal para informar el cambio de lugar o sucursal de trabajo y dejar constancia de las condiciones del traslado.";
+  }
+
+  if (/zero trust|ciberseguridad|seguridad informatica|seguridad/.test(normalizedText)) {
+    return "el documento trata sobre seguridad y ciberseguridad, especialmente controles, acceso y recomendaciones para proteger la operación.";
+  }
+
+  if (/contrato|acuerdo|clausula|firmante/.test(normalizedText)) {
+    return "el documento parece tratar de un acuerdo o contrato, con condiciones, responsabilidades y puntos formales entre las partes.";
+  }
+
+  if (/factura|invoice|monto|subtotal|total/.test(normalizedText)) {
+    return "el documento parece tratar de una factura o registro económico, con montos, conceptos y datos de cobro o compra.";
+  }
+
+  if (title) {
+    return `el documento trata principalmente de "${toSentenceCase(title)}".`;
+  }
+
+  const firstUseful = extractUsefulSentences(text, []).at(0);
+  return firstUseful
+    ? `${nameHint} trata sobre ${lowercaseFirst(firstUseful)}.`
+    : `${nameHint} tiene información cargada, pero necesito una pregunta un poco más específica para resumirlo mejor.`;
+}
+
+function inferKeyPoints(text: string, snippets: string[]) {
+  const normalizedText = normalize(text);
+  const points: string[] = [];
+
+  if (/traslado/.test(normalizedText)) {
+    points.push("Comunica formalmente el traslado del empleado.");
+  }
+
+  if (/fecha efectiva/.test(normalizedText)) {
+    points.push("Indica la fecha efectiva en que aplicará el cambio.");
+  }
+
+  if (/cargo.*salario.*beneficios|salario.*beneficios/.test(normalizedText)) {
+    points.push("Aclara que cargo, salario, beneficios y condiciones laborales se mantienen sin cambios.");
+  }
+
+  if (/firma|recibido|conformidad/.test(normalizedText)) {
+    points.push("Solicita firma o constancia de recibido y conformidad.");
+  }
+
+  if (!points.length) {
+    points.push(...extractUsefulSentences(snippets.length ? snippets.join("\n") : text, []).slice(0, 4).map(cleanSnippet));
+  }
+
+  return Array.from(new Set(points)).filter(Boolean).slice(0, 4);
+}
+
+function findDocumentTitle(text: string) {
+  return (
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length >= 8 && line.length <= 90 && /^[A-ZÁÉÍÓÚÑ0-9\s.,:-]+$/.test(line)) ?? ""
+  );
+}
+
+function extractUsefulSentences(text: string, questionTokens: string[]) {
+  const rawSentences = text
+    .replace(/\r/g, "\n")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(cleanSnippet)
+    .filter((sentence) => sentence.length >= 20 && sentence.length <= 260)
+    .slice(0, 80);
+
+  return rawSentences
+    .map((sentence) => ({
+      sentence,
+      score:
+        questionTokens.reduce((total, token) => total + (normalize(sentence).includes(token) ? 2 : 0), 0) +
+        (/\b(comunica|indica|solicita|establece|incluye|fecha|condiciones|objetivo|resumen)\b/i.test(sentence) ? 2 : 0),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.sentence);
+}
+
+function cleanSnippet(value: string) {
+  return value.replace(/\s+/g, " ").replace(/^[\d).-]+\s*/, "").trim();
+}
+
+function readableFileName(fileName: string) {
+  return fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
+}
+
+function toSentenceCase(value: string) {
+  const lower = value.toLocaleLowerCase("es-DO");
+  return lower.charAt(0).toLocaleUpperCase("es-DO") + lower.slice(1);
+}
+
+function lowercaseFirst(value: string) {
+  return value.charAt(0).toLocaleLowerCase("es-DO") + value.slice(1);
 }
 
 async function answerAcrossDocuments(organizationId: string, documents: QuoteDocument[], question: string) {
@@ -720,10 +862,9 @@ function documentOverviewAnswer(documents: QuoteDocument[], detectedRows: number
   return {
     documentId: documents[0]?.id,
     answer: [
-      `Sí. Tengo ${documents.length} documento${documents.length === 1 ? "" : "s"} cargado${documents.length === 1 ? "" : "s"} en este chat.`,
+      `Sí, ya los leí. Tengo ${documents.length} documento${documents.length === 1 ? "" : "s"} cargado${documents.length === 1 ? "" : "s"} en este chat.`,
       fileList,
-      `Pude leer aproximadamente ${lineCount} líneas de texto o datos útiles${detectedRows ? ` y detecté ${detectedRows} registros comparables` : ""}.`,
-      "Puedes preguntarme por resumen, datos específicos, diferencias entre archivos, fechas, montos, nombres o cualquier detalle del contenido.",
+      `Puedo ayudarte a resumirlos, buscar datos específicos, comparar información entre archivos o explicarte de qué trata cada uno.${detectedRows ? ` También detecté ${detectedRows} registros que se pueden comparar si necesitas análisis de datos.` : ""}`,
     ].join("\n\n"),
     context: { documentCount: documents.length, lineCount, detectedRows },
   };
@@ -868,11 +1009,13 @@ function fallbackWorkspaceAnswer(documents: QuoteDocument[], question: string) {
     }))
     .sort((a, b) => b.score - a.score);
   const bestDocument = scoredDocuments[0]?.document ?? documents[0];
-  const result = answerFromDocument(bestDocument.extractedText, bestDocument.structured, question);
+  const result = answerFromDocument(bestDocument.extractedText, bestDocument.structured, question, {
+    fileName: bestDocument.fileName,
+  });
 
   return {
     documentId: bestDocument.id,
-    answer: `Revisé ${documents.length} documentos. La mejor coincidencia fue "${bestDocument.fileName}".\n\n${result.answer}`,
+    answer: result.answer,
     context: { ...result.context, documentCount: documents.length, selectedDocument: bestDocument.fileName },
   };
 }
