@@ -69,7 +69,7 @@ aiConsultRouter.get("/chats", async (req, res, next) => {
 aiConsultRouter.post("/chats", validate({ body: createAiChatSchema }), async (req, res, next) => {
   try {
     const { title } = createAiChatSchema.parse(req.body);
-    const chat = await createAiChat(organizationId(req), req.user?.id ?? null, title ?? "Cotizaciones de hoy");
+    const chat = await createAiChat(organizationId(req), req.user?.id ?? null, title ?? "Chat de documentos");
     res.status(201).json({ chat });
   } catch (error) {
     next(error);

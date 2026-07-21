@@ -331,7 +331,7 @@ let aiDocuments: AiDocumentDetail[] = [
 let aiChats: AiChatSummary[] = [
   {
     id: "chat_demo_today",
-    title: "Cotizaciones de hoy",
+    title: "Chat de documentos",
     createdAt: now,
     updatedAt: now,
     documentCount: 1,
@@ -504,7 +504,7 @@ export const demoApi = {
   createAiChat: (title: string) => {
     const chat: AiChatSummary = {
       id: `chat_${Date.now()}`,
-      title: title.trim() || "Cotizaciones de hoy",
+      title: title.trim() || "Chat de documentos",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       documentCount: 0,
@@ -975,7 +975,7 @@ function answerWorkspaceQuestion(question: string) {
     ].join("\n\n");
   }
 
-  return "Revisé todos los documentos demo. Puedes preguntar, por ejemplo: ¿quién vende más barato la manzana?";
+  return "Sí. Revisé los documentos demo cargados en este chat. Puedes pedirme un resumen, buscar datos concretos, comparar archivos o extraer información importante.";
 }
 
 function ok<T>(value: T) {

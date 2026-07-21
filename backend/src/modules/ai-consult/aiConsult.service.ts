@@ -498,7 +498,7 @@ export async function askAiWorkspace(organizationId: string, askedById: string |
   });
 
   if (!documents.length) {
-    const error = new Error("Sube una cotización o reporte antes de preguntar.");
+    const error = new Error("Sube un documento o reporte antes de preguntar.");
     (error as Error & { status: number }).status = 400;
     throw error;
   }
@@ -551,7 +551,7 @@ export async function askAiChat(organizationId: string, chatId: string, askedByI
   }
 
   if (!chat.documents.length) {
-    const error = new Error("Sube cotizaciones a este chat antes de preguntar.");
+    const error = new Error("Sube documentos a este chat antes de preguntar.");
     (error as Error & { status: number }).status = 400;
     throw error;
   }
@@ -637,7 +637,7 @@ async function ensureAiChat(organizationId: string, chatId: string) {
 }
 
 function defaultChatTitle() {
-  return `Cotizaciones ${new Intl.DateTimeFormat("es-DO", { day: "2-digit", month: "short" }).format(new Date())}`;
+  return `Chat ${new Intl.DateTimeFormat("es-DO", { day: "2-digit", month: "short" }).format(new Date())}`;
 }
 
 function toJson(value: unknown) {
@@ -694,20 +694,39 @@ async function answerAcrossDocuments(organizationId: string, documents: QuoteDoc
   const aliasedLines = quoteLines.map((line) => ({ ...line, productKey: productKeyFor(line.product, allAliases) }));
   const normalizedQuestion = normalize(question);
   const wantsPriceAnswer = /\b(barat|menor|precio|costo|cotiz|compar|vende|vendiendo|econom)/.test(normalizedQuestion);
+  const wantsDocumentOverview = /\b(leiste|leido|leer|documento|documentos|archivo|archivos|resumen|tratan|contienen|contenido)\b/.test(normalizedQuestion);
 
   if (wantsPriceAnswer && aliasedLines.length) {
     return compareQuoteLines(aliasedLines, question, learnedAliases);
   }
 
-  if (/\b(cuantos|cuantas|cantidad|archivos|documentos|cotizaciones)\b/.test(normalizedQuestion)) {
-    return {
-      documentId: documents[0]?.id,
-      answer: `Tienes ${documents.length} documentos cargados y pude detectar ${aliasedLines.length} líneas de cotización para comparar.`,
-      context: { documentCount: documents.length, quoteLineCount: aliasedLines.length },
-    };
+  if (wantsDocumentOverview || /\b(cuantos|cuantas|cantidad)\b/.test(normalizedQuestion)) {
+    return documentOverviewAnswer(documents, aliasedLines.length);
   }
 
   return fallbackWorkspaceAnswer(documents, question);
+}
+
+function documentOverviewAnswer(documents: QuoteDocument[], detectedRows: number) {
+  const lineCount = documents.reduce(
+    (total, document) => total + document.extractedText.split(/\r?\n/).filter((line) => line.trim()).length,
+    0,
+  );
+  const fileList = documents
+    .slice(0, 8)
+    .map((document, index) => `${index + 1}. ${document.fileName}`)
+    .join("\n");
+
+  return {
+    documentId: documents[0]?.id,
+    answer: [
+      `Sí. Tengo ${documents.length} documento${documents.length === 1 ? "" : "s"} cargado${documents.length === 1 ? "" : "s"} en este chat.`,
+      fileList,
+      `Pude leer aproximadamente ${lineCount} líneas de texto o datos útiles${detectedRows ? ` y detecté ${detectedRows} registros comparables` : ""}.`,
+      "Puedes preguntarme por resumen, datos específicos, diferencias entre archivos, fechas, montos, nombres o cualquier detalle del contenido.",
+    ].join("\n\n"),
+    context: { documentCount: documents.length, lineCount, detectedRows },
+  };
 }
 
 function extractQuoteLines(document: QuoteDocument, aliases: ProductAlias[]) {

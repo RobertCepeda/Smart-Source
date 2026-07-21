@@ -31,7 +31,7 @@ export function AiConsult() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [newChatTitle, setNewChatTitle] = useState("Cotizaciones de hoy");
+  const [newChatTitle, setNewChatTitle] = useState("Chat de documentos");
   const [question, setQuestion] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -66,8 +66,8 @@ export function AiConsult() {
     mutationFn: (title: string) => createAiChatRequest(token!, title),
     onSuccess: async ({ chat }) => {
       setSelectedChatId(chat.id);
-      setNewChatTitle("Cotizaciones de hoy");
-      setNotice("Chat creado. Ya puedes subir cotizaciones.");
+      setNewChatTitle("Chat de documentos");
+      setNotice("Chat creado. Ya puedes subir documentos.");
       await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
     },
     onError: (error) => {
@@ -115,7 +115,7 @@ export function AiConsult() {
       return null;
     }
 
-    const { chat } = await createAiChatRequest(token, newChatTitle || "Cotizaciones de hoy");
+    const { chat } = await createAiChatRequest(token, newChatTitle || "Chat de documentos");
     setSelectedChatId(chat.id);
     await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
     return chat.id;
@@ -123,7 +123,7 @@ export function AiConsult() {
 
   function onCreateChat(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    createChatMutation.mutate(newChatTitle || "Cotizaciones de hoy");
+    createChatMutation.mutate(newChatTitle || "Chat de documentos");
   }
 
   async function uploadFiles(fileList: FileList | File[] | null | undefined) {
@@ -184,7 +184,7 @@ export function AiConsult() {
     }
 
     if (!documents.length) {
-      setNotice("Sube cotizaciones a este chat antes de preguntar.");
+      setNotice("Sube documentos a este chat antes de preguntar.");
       return;
     }
 
@@ -196,9 +196,9 @@ export function AiConsult() {
   return (
     <div className="space-y-3">
       <PageHeader
-        eyebrow="Compras y análisis"
+        eyebrow="Análisis inteligente"
         title="Consultas IA"
-        description="Chats separados por tema, con archivos e historial guardado."
+        description="Chats por tema para analizar documentos, reportes, cartas, contratos o cualquier archivo."
         actions={
           <>
             <input
@@ -239,7 +239,7 @@ export function AiConsult() {
                   className="h-8"
                   value={newChatTitle}
                   onChange={(event) => setNewChatTitle(event.target.value)}
-                  placeholder="Cotizaciones de hoy"
+                  placeholder="Chat de documentos"
                 />
                 <Button type="submit" size="sm" className="w-full" disabled={createChatMutation.isPending}>
                   <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -292,7 +292,7 @@ export function AiConsult() {
                   </span>
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-ink">Archivos del chat</p>
-                    <p className="text-[11px] text-slate-500">Cada chat mantiene sus propias cotizaciones.</p>
+                    <p className="text-[11px] text-slate-500">Cada chat mantiene sus propios documentos e historial.</p>
                   </div>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
@@ -310,7 +310,7 @@ export function AiConsult() {
                     onDelete={() => deleteDocumentMutation.mutate(document.id)}
                   />
                 ))}
-                {!documents.length ? <EmptyState text="Sube PDFs, Excel o CSV para iniciar el análisis." /> : null}
+                {!documents.length ? <EmptyState text="Sube PDF, Excel, CSV, DOCX o TXT para iniciar el análisis." /> : null}
               </div>
             </div>
 
@@ -327,7 +327,7 @@ export function AiConsult() {
                   message={{
                     id: "empty",
                     role: "assistant",
-                    text: "Este chat está listo. Sube cotizaciones y pregúntame cuál empresa ofrece mejor precio.",
+                    text: "Este chat está listo. Sube documentos y pregúntame por resumen, detalles, comparaciones o datos específicos.",
                     createdAt: new Date().toISOString(),
                   }}
                 />
@@ -340,7 +340,7 @@ export function AiConsult() {
               {askMutation.isPending ? (
                 <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs text-slate-600">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-700" />
-                  Analizando cotizaciones...
+                  Analizando documentos...
                 </div>
               ) : null}
             </div>
@@ -349,7 +349,7 @@ export function AiConsult() {
               <div className="flex gap-2">
                 <textarea
                   className="min-h-[54px] flex-1 resize-none rounded-lg border border-border bg-white px-3 py-2 text-xs leading-5 text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  placeholder="Ejemplo: ¿quién vende más barato la manzana?"
+                  placeholder="Ejemplo: hazme un resumen de estos documentos"
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                 />
