@@ -2,8 +2,19 @@ import { Router } from "express";
 import multer from "multer";
 import { authenticate } from "../auth/auth.middleware";
 import { validate } from "../../middlewares/validate";
-import { aiDocumentParamsSchema, askAiDocumentSchema } from "./aiConsult.schema";
-import { askAiDocument, askAiWorkspace, createAiDocument, getAiDocument, listAiDocuments } from "./aiConsult.service";
+import { aiChatParamsSchema, aiDocumentParamsSchema, askAiDocumentSchema, createAiChatSchema } from "./aiConsult.schema";
+import {
+  askAiChat,
+  askAiDocument,
+  askAiWorkspace,
+  createAiChat,
+  createAiDocument,
+  getAiChat,
+  getAiDocument,
+  listAiChats,
+  listAiDocuments,
+  uploadAiChatDocument,
+} from "./aiConsult.service";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -45,6 +56,68 @@ aiConsultRouter.post("/documents", upload.single("file"), async (req, res, next)
     next(error);
   }
 });
+
+aiConsultRouter.get("/chats", async (req, res, next) => {
+  try {
+    res.json({ chats: await listAiChats(organizationId(req)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiConsultRouter.post("/chats", validate({ body: createAiChatSchema }), async (req, res, next) => {
+  try {
+    const { title } = createAiChatSchema.parse(req.body);
+    const chat = await createAiChat(organizationId(req), req.user?.id ?? null, title ?? "Cotizaciones de hoy");
+    res.status(201).json({ chat });
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiConsultRouter.get("/chats/:id", validate({ params: aiChatParamsSchema }), async (req, res, next) => {
+  try {
+    const { id } = aiChatParamsSchema.parse(req.params);
+    res.json({ chat: await getAiChat(organizationId(req), id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiConsultRouter.post(
+  "/chats/:id/documents",
+  validate({ params: aiChatParamsSchema }),
+  upload.single("file"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ message: "Selecciona un archivo para analizar." });
+        return;
+      }
+
+      const { id } = aiChatParamsSchema.parse(req.params);
+      const document = await uploadAiChatDocument(organizationId(req), id, req.user?.id ?? null, req.file);
+      res.status(201).json({ document });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+aiConsultRouter.post(
+  "/chats/:id/questions",
+  validate({ params: aiChatParamsSchema, body: askAiDocumentSchema }),
+  async (req, res, next) => {
+    try {
+      const { id } = aiChatParamsSchema.parse(req.params);
+      const { question } = askAiDocumentSchema.parse(req.body);
+      const answer = await askAiChat(organizationId(req), id, req.user?.id ?? null, question);
+      res.status(201).json({ answer });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 aiConsultRouter.get("/documents/:id", validate({ params: aiDocumentParamsSchema }), async (req, res, next) => {
   try {

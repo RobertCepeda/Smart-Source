@@ -1,78 +1,118 @@
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckCircle2, FileText, Layers3, Loader2, Paperclip, Send, Sparkles, Upload } from "lucide-react";
+import { Bot, FileText, Loader2, MessageSquarePlus, Paperclip, Plus, Send, Sparkles, Upload } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
+import { Input } from "../components/ui/input";
 import { useAuth } from "../contexts/AuthContext";
 import {
-  askAiDocumentRequest,
-  listAiDocumentsRequest,
-  uploadAiDocumentRequest,
+  askAiChatRequest,
+  createAiChatRequest,
+  getAiChatRequest,
+  listAiChatsRequest,
+  uploadAiChatDocumentRequest,
+  type AiChatSummary,
   type AiDocumentSummary,
+  type AiQuestionAnswer,
 } from "../services/api";
 import { cn } from "../lib/utils";
 
 const acceptedFileTypes = ".csv,.xlsx,.xls,.pdf,.json,.txt,.docx";
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  createdAt: string;
-};
+type ChatMessage =
+  | { id: string; role: "user"; text: string; createdAt: string }
+  | { id: string; role: "assistant"; text: string; createdAt: string };
 
 export function AiConsult() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [newChatTitle, setNewChatTitle] = useState("Cotizaciones de hoy");
   const [question, setQuestion] = useState("");
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      text: "Sube varias cotizaciones y pregunta algo como: ¿quién vende más barato la manzana?",
-      createdAt: new Date().toISOString(),
-    },
-  ]);
 
-  const documentsQuery = useQuery({
-    queryKey: ["ai-documents"],
-    queryFn: () => listAiDocumentsRequest(token!),
+  const chatsQuery = useQuery({
+    queryKey: ["ai-chats"],
+    queryFn: () => listAiChatsRequest(token!),
     enabled: Boolean(token),
   });
 
-  const documents = useMemo(() => documentsQuery.data?.documents ?? [], [documentsQuery.data?.documents]);
-  const selectedDocument = documents.find((document) => document.id === selectedDocumentId) ?? null;
-  const totalRows = documents.reduce((total, document) => total + document.rowCount, 0);
-  const totalQuestions = documents.reduce((total, document) => total + document.questionCount, 0);
+  const chats = useMemo(() => chatsQuery.data?.chats ?? [], [chatsQuery.data?.chats]);
+  const selectedChat = chats.find((chat) => chat.id === selectedChatId) ?? null;
 
-  const askMutation = useMutation({
-    mutationFn: (nextQuestion: string) => askAiDocumentRequest(token!, selectedDocumentId, nextQuestion),
-    onSuccess: async ({ answer }) => {
-      setQuestion("");
-      setMessages((current) => [
-        ...current,
-        { id: answer.id, role: "assistant", text: answer.answer, createdAt: answer.createdAt },
-      ]);
-      await queryClient.invalidateQueries({ queryKey: ["ai-documents"] });
+  const chatQuery = useQuery({
+    queryKey: ["ai-chat", selectedChatId],
+    queryFn: () => getAiChatRequest(token!, selectedChatId!),
+    enabled: Boolean(token && selectedChatId),
+  });
+
+  const chatDetail = chatQuery.data?.chat ?? null;
+  const documents = chatDetail?.documents ?? [];
+  const messages = buildMessages(chatDetail?.questions ?? [], pendingQuestion);
+
+  useEffect(() => {
+    if (!selectedChatId && chats.length) {
+      setSelectedChatId(chats[0].id);
+    }
+  }, [chats, selectedChatId]);
+
+  const createChatMutation = useMutation({
+    mutationFn: (title: string) => createAiChatRequest(token!, title),
+    onSuccess: async ({ chat }) => {
+      setSelectedChatId(chat.id);
+      setNewChatTitle("Cotizaciones de hoy");
+      setNotice("Chat creado. Ya puedes subir cotizaciones.");
+      await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
     },
     onError: (error) => {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `error_${Date.now()}`,
-          role: "assistant",
-          text: error instanceof Error ? error.message : "No pude responder esa pregunta.",
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      setNotice(error instanceof Error ? error.message : "No pude crear el chat.");
     },
   });
+
+  const askMutation = useMutation({
+    mutationFn: ({ chatId, nextQuestion }: { chatId: string; nextQuestion: string }) =>
+      askAiChatRequest(token!, chatId, nextQuestion),
+    onSuccess: async () => {
+      setQuestion("");
+      setPendingQuestion(null);
+      await queryClient.invalidateQueries({ queryKey: ["ai-chat", selectedChatId] });
+      await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
+    },
+    onError: (error) => {
+      setNotice(error instanceof Error ? error.message : "No pude responder esa pregunta.");
+      setPendingQuestion(null);
+    },
+  });
+
+  async function ensureActiveChat() {
+    if (selectedChatId) {
+      return selectedChatId;
+    }
+
+    if (chats[0]?.id) {
+      setSelectedChatId(chats[0].id);
+      return chats[0].id;
+    }
+
+    if (!token) {
+      return null;
+    }
+
+    const { chat } = await createAiChatRequest(token, newChatTitle || "Cotizaciones de hoy");
+    setSelectedChatId(chat.id);
+    await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
+    return chat.id;
+  }
+
+  function onCreateChat(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    createChatMutation.mutate(newChatTitle || "Cotizaciones de hoy");
+  }
 
   async function uploadFiles(fileList: FileList | File[] | null | undefined) {
     const files = Array.from(fileList ?? []);
@@ -85,22 +125,19 @@ export function AiConsult() {
     setIsUploading(true);
 
     try {
-      for (const file of files) {
-        await uploadAiDocumentRequest(token, file);
+      const chatId = await ensureActiveChat();
+
+      if (!chatId) {
+        return;
       }
 
-      setSelectedDocumentId(null);
-      setNotice(`${files.length} documento${files.length === 1 ? "" : "s"} importado${files.length === 1 ? "" : "s"}.`);
-      setMessages((current) => [
-        ...current,
-        {
-          id: `upload_${Date.now()}`,
-          role: "assistant",
-          text: `Listo. Ya puedo comparar ${files.length} ${files.length === 1 ? "cotización" : "cotizaciones"} contra el resto del workspace.`,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
-      await queryClient.invalidateQueries({ queryKey: ["ai-documents"] });
+      for (const file of files) {
+        await uploadAiChatDocumentRequest(token, chatId, file);
+      }
+
+      setNotice(`${files.length} archivo${files.length === 1 ? "" : "s"} agregado${files.length === 1 ? "" : "s"} al chat.`);
+      await queryClient.invalidateQueries({ queryKey: ["ai-chat", chatId] });
+      await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No pude importar esos documentos.");
     } finally {
@@ -118,26 +155,30 @@ export function AiConsult() {
     void uploadFiles(event.dataTransfer.files);
   }
 
-  function onAsk(event: FormEvent<HTMLFormElement>) {
+  async function onAsk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextQuestion = question.trim();
-
-    if (!documents.length) {
-      setNotice("Primero sube una cotización o reporte.");
-      return;
-    }
 
     if (nextQuestion.length < 3) {
       setNotice("Escribe una pregunta un poco más completa.");
       return;
     }
 
+    const chatId = await ensureActiveChat();
+
+    if (!chatId) {
+      setNotice("Crea un chat primero.");
+      return;
+    }
+
+    if (!documents.length) {
+      setNotice("Sube cotizaciones a este chat antes de preguntar.");
+      return;
+    }
+
     setNotice(null);
-    setMessages((current) => [
-      ...current,
-      { id: `user_${Date.now()}`, role: "user", text: nextQuestion, createdAt: new Date().toISOString() },
-    ]);
-    askMutation.mutate(nextQuestion);
+    setPendingQuestion(nextQuestion);
+    askMutation.mutate({ chatId, nextQuestion });
   }
 
   return (
@@ -145,7 +186,7 @@ export function AiConsult() {
       <PageHeader
         eyebrow="Compras y análisis"
         title="Consultas IA"
-        description="Compara cotizaciones, encuentra mejores precios y guarda equivalencias de productos."
+        description="Chats separados por tema, con archivos e historial guardado."
         actions={
           <>
             <input
@@ -156,9 +197,13 @@ export function AiConsult() {
               accept={acceptedFileTypes}
               onChange={onFileChange}
             />
+            <Button type="button" variant="outline" onClick={() => onCreateChat()} disabled={createChatMutation.isPending}>
+              {createChatMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Nuevo chat
+            </Button>
             <Button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
               {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-              Subir cotizaciones
+              Subir archivos
             </Button>
           </>
         }
@@ -173,69 +218,35 @@ export function AiConsult() {
       <section className="grid gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="space-y-3">
           <Card>
-            <CardContent className="space-y-3 p-3">
-              <div
-                className="rounded-lg border border-dashed border-border bg-slate-50 p-3"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={onDrop}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                    <Paperclip className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <p className="text-xs font-bold text-ink">PDF, Excel, CSV, DOCX</p>
-                    <p className="text-[11px] text-slate-500">Puedes subir varios a la vez.</p>
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-3 w-full"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
-                >
-                  {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  Importar
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <MiniStat label="Docs" value={documents.length} />
-                <MiniStat label="Filas" value={totalRows} />
-                <MiniStat label="Chats" value={totalQuestions} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden">
             <CardHeader className="px-3 py-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-bold text-ink">Cotizaciones</h2>
-                <Badge tone="slate">{documents.length}</Badge>
-              </div>
+              <h2 className="text-sm font-bold text-ink">Conversaciones</h2>
             </CardHeader>
-            <CardContent className="max-h-[520px] space-y-2 overflow-y-auto p-2.5">
-              <ScopeButton
-                label="Todas las cotizaciones"
-                detail="Comparar workspace completo"
-                isActive={!selectedDocumentId}
-                icon={Layers3}
-                onClick={() => setSelectedDocumentId(null)}
-              />
-
-              {documentsQuery.isLoading ? <EmptyState text="Cargando documentos..." /> : null}
-              {!documentsQuery.isLoading && !documents.length ? <EmptyState text="Todavía no hay cotizaciones." /> : null}
-
-              {documents.map((document) => (
-                <DocumentButton
-                  key={document.id}
-                  document={document}
-                  isActive={document.id === selectedDocumentId}
-                  onClick={() => setSelectedDocumentId(document.id)}
+            <CardContent className="space-y-3 p-3">
+              <form className="space-y-2" onSubmit={onCreateChat}>
+                <Input
+                  className="h-8"
+                  value={newChatTitle}
+                  onChange={(event) => setNewChatTitle(event.target.value)}
+                  placeholder="Cotizaciones de hoy"
                 />
-              ))}
+                <Button type="submit" size="sm" className="w-full" disabled={createChatMutation.isPending}>
+                  <MessageSquarePlus className="h-3.5 w-3.5" />
+                  Crear chat
+                </Button>
+              </form>
+
+              <div className="max-h-[620px] space-y-2 overflow-y-auto">
+                {chatsQuery.isLoading ? <EmptyState text="Cargando chats..." /> : null}
+                {!chatsQuery.isLoading && !chats.length ? <EmptyState text="Crea un chat para empezar." /> : null}
+                {chats.map((chat) => (
+                  <ChatButton
+                    key={chat.id}
+                    chat={chat}
+                    isActive={chat.id === selectedChatId}
+                    onClick={() => setSelectedChatId(chat.id)}
+                  />
+                ))}
+              </div>
             </CardContent>
           </Card>
         </aside>
@@ -247,23 +258,68 @@ export function AiConsult() {
                 <Bot className="h-4 w-4" />
               </span>
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-bold text-ink">Chat de compras</h2>
+                <h2 className="truncate text-sm font-bold text-ink">{selectedChat?.title ?? "Selecciona un chat"}</h2>
                 <p className="truncate text-[11px] text-slate-500">
-                  {selectedDocument ? selectedDocument.fileName : "Consultando todas las cotizaciones"}
+                  {documents.length} archivo{documents.length === 1 ? "" : "s"} en esta conversación
                 </p>
               </div>
             </div>
-            <Badge tone="green">
-              <CheckCircle2 className="mr-1 h-3 w-3" />
-              Backend activo
-            </Badge>
+            <Badge tone="green">Historial activo</Badge>
           </CardHeader>
 
-          <CardContent className="flex min-h-[610px] flex-col p-0">
+          <CardContent className="flex min-h-[650px] flex-col p-0">
+            <div
+              className="border-b border-border bg-white p-3"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={onDrop}
+            >
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-brand-700">
+                    <Paperclip className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-ink">Archivos del chat</p>
+                    <p className="text-[11px] text-slate-500">Cada chat mantiene sus propias cotizaciones.</p>
+                  </div>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                  {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Agregar
+                </Button>
+              </div>
+
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                {documents.map((document) => (
+                  <DocumentChip key={document.id} document={document} />
+                ))}
+                {!documents.length ? <EmptyState text="Sube PDFs, Excel o CSV para iniciar el análisis." /> : null}
+              </div>
+            </div>
+
             <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/70 p-3">
+              {chatQuery.isLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs text-slate-600">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-700" />
+                  Cargando historial...
+                </div>
+              ) : null}
+
+              {!chatQuery.isLoading && !messages.length ? (
+                <ChatBubble
+                  message={{
+                    id: "empty",
+                    role: "assistant",
+                    text: "Este chat está listo. Sube cotizaciones y pregúntame cuál empresa ofrece mejor precio.",
+                    createdAt: new Date().toISOString(),
+                  }}
+                />
+              ) : null}
+
               {messages.map((message) => (
                 <ChatBubble key={message.id} message={message} />
               ))}
+
               {askMutation.isPending ? (
                 <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs text-slate-600">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-700" />
@@ -280,7 +336,7 @@ export function AiConsult() {
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                 />
-                <Button type="submit" className="h-[54px] self-end" disabled={askMutation.isPending || !documents.length}>
+                <Button type="submit" className="h-[54px] self-end" disabled={askMutation.isPending || !selectedChatId}>
                   {askMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                   Enviar
                 </Button>
@@ -293,48 +349,20 @@ export function AiConsult() {
   );
 }
 
-function ScopeButton({
-  label,
-  detail,
-  isActive,
-  icon: Icon,
-  onClick,
-}: {
-  label: string;
-  detail: string;
-  isActive: boolean;
-  icon: typeof Layers3;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "flex w-full items-center gap-2 rounded-lg border p-2.5 text-left transition",
-        isActive ? "border-brand-200 bg-brand-50 text-brand-900" : "border-border bg-white hover:bg-slate-50",
-      )}
-      onClick={onClick}
-    >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-700">
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-xs font-bold text-ink">{label}</span>
-        <span className="block truncate text-[11px] text-slate-500">{detail}</span>
-      </span>
-    </button>
-  );
+function buildMessages(questions: AiQuestionAnswer[], pendingQuestion: string | null): ChatMessage[] {
+  const history = questions.flatMap<ChatMessage>((entry) => [
+    { id: `${entry.id}_user`, role: "user", text: entry.question, createdAt: entry.createdAt },
+    { id: `${entry.id}_assistant`, role: "assistant", text: entry.answer, createdAt: entry.createdAt },
+  ]);
+
+  if (pendingQuestion) {
+    history.push({ id: "pending_user", role: "user", text: pendingQuestion, createdAt: new Date().toISOString() });
+  }
+
+  return history;
 }
 
-function DocumentButton({
-  document,
-  isActive,
-  onClick,
-}: {
-  document: AiDocumentSummary;
-  isActive: boolean;
-  onClick: () => void;
-}) {
+function ChatButton({ chat, isActive, onClick }: { chat: AiChatSummary; isActive: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -345,19 +373,38 @@ function DocumentButton({
       onClick={onClick}
     >
       <div className="flex items-start gap-2">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-brand-700">
-          <FileText className="h-4 w-4" />
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-700">
+          <Bot className="h-4 w-4" />
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-xs font-bold text-ink">{document.fileName}</span>
-          <span className="mt-1 block line-clamp-2 text-[11px] leading-4 text-slate-500">{document.summary}</span>
-          <span className="mt-2 flex flex-wrap gap-1.5">
-            <Badge tone="slate">{formatFileSize(document.sizeBytes)}</Badge>
-            <Badge tone="blue">{document.rowCount} filas</Badge>
+          <span className="block truncate text-xs font-bold text-ink">{chat.title}</span>
+          <span className="mt-1 block truncate text-[11px] text-slate-500">
+            {chat.documentCount} archivo{chat.documentCount === 1 ? "" : "s"} · {chat.questionCount} mensaje
+            {chat.questionCount === 1 ? "" : "s"}
           </span>
+          {chat.recentFiles.length ? (
+            <span className="mt-2 block truncate text-[11px] text-slate-400">{chat.recentFiles.join(", ")}</span>
+          ) : null}
         </span>
       </div>
     </button>
+  );
+}
+
+function DocumentChip({ document }: { document: AiDocumentSummary }) {
+  return (
+    <div className="flex min-w-[220px] items-start gap-2 rounded-lg border border-border bg-white p-2.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-brand-700">
+        <FileText className="h-4 w-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-bold text-ink">{document.fileName}</span>
+        <span className="mt-1 flex flex-wrap gap-1.5">
+          <Badge tone="slate">{formatFileSize(document.sizeBytes)}</Badge>
+          <Badge tone="blue">{document.rowCount} filas</Badge>
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -380,15 +427,6 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         ) : null}
         <p className="whitespace-pre-wrap">{message.text}</p>
       </div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-border bg-white p-2">
-      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">{label}</p>
-      <p className="mt-1 text-base font-bold text-ink">{value}</p>
     </div>
   );
 }

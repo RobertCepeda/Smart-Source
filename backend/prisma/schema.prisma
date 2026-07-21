@@ -25,6 +25,7 @@ model User {
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   supportMessages SupportMessage[]
   requestedTickets SupportTicket[] @relation("TicketRequester")
+  aiChats AiChat[]
   aiDocuments AiDocument[]
   aiQuestions AiQuestion[]
 
@@ -49,6 +50,7 @@ model Organization {
   brands      Brand[]
   items       Item[]
   supportTickets SupportTicket[]
+  aiChats AiChat[]
   aiDocuments AiDocument[]
   aiProductAliases AiProductAlias[]
 
@@ -318,9 +320,28 @@ model PriceHistory {
   @@index([recordedAt])
 }
 
+model AiChat {
+  id             String       @id @default(cuid())
+  organizationId String
+  createdById    String?
+  title          String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  documents      AiDocument[]
+  questions      AiQuestion[]
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([updatedAt])
+}
+
 model AiDocument {
   id             String       @id @default(cuid())
   organizationId String
+  chatId         String?
   uploadedById   String?
   fileName       String
   mimeType       String?
@@ -333,10 +354,12 @@ model AiDocument {
   updatedAt      DateTime     @updatedAt
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chat           AiChat?      @relation(fields: [chatId], references: [id], onDelete: SetNull)
   uploadedBy     User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
   questions      AiQuestion[]
 
   @@index([organizationId])
+  @@index([chatId])
   @@index([uploadedById])
   @@index([createdAt])
 }
@@ -344,6 +367,7 @@ model AiDocument {
 model AiQuestion {
   id         String     @id @default(cuid())
   documentId String
+  chatId     String?
   askedById  String?
   question   String     @db.Text
   answer     String     @db.Text
@@ -351,9 +375,11 @@ model AiQuestion {
   createdAt  DateTime   @default(now())
 
   document   AiDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chat       AiChat?    @relation(fields: [chatId], references: [id], onDelete: SetNull)
   askedBy    User?      @relation(fields: [askedById], references: [id], onDelete: SetNull)
 
   @@index([documentId])
+  @@index([chatId])
   @@index([askedById])
   @@index([createdAt])
 }

@@ -407,6 +407,7 @@ export type OrganizationWorkspaceResponse = {
 
 export type AiDocumentSummary = {
   id: string;
+  chatId?: string | null;
   fileName: string;
   mimeType: string | null;
   extension: string | null;
@@ -428,6 +429,21 @@ export type AiQuestionAnswer = {
 
 export type AiDocumentDetail = AiDocumentSummary & {
   extractedTextPreview: string;
+  questions: AiQuestionAnswer[];
+};
+
+export type AiChatSummary = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  documentCount: number;
+  questionCount: number;
+  recentFiles: string[];
+};
+
+export type AiChatDetail = AiChatSummary & {
+  documents: AiDocumentSummary[];
   questions: AiQuestionAnswer[];
 };
 
@@ -791,6 +807,38 @@ export async function listAiDocumentsRequest(token: string) {
   });
 }
 
+export async function listAiChatsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listAiChats();
+  }
+
+  return apiRequest<{ chats: AiChatSummary[] }>("/ai-consult/chats", {
+    headers: authHeaders(token),
+  });
+}
+
+export async function createAiChatRequest(token: string, title: string) {
+  if (isDemoMode) {
+    return demoApi.createAiChat(title);
+  }
+
+  return apiRequest<{ chat: AiChatSummary }>("/ai-consult/chats", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function getAiChatRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.getAiChat(id);
+  }
+
+  return apiRequest<{ chat: AiChatDetail }>(`/ai-consult/chats/${id}`, {
+    headers: authHeaders(token),
+  });
+}
+
 export async function uploadAiDocumentRequest(token: string, file: File) {
   if (isDemoMode) {
     return demoApi.uploadAiDocument(file);
@@ -800,6 +848,29 @@ export async function uploadAiDocumentRequest(token: string, file: File) {
   formData.set("file", file);
 
   const response = await fetch(`${API_BASE_URL}/ai-consult/documents`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: formData,
+  });
+
+  const data = (await response.json().catch(() => ({}))) as { message?: string };
+
+  if (!response.ok) {
+    throw new Error(data.message ?? "No pudimos importar el documento.");
+  }
+
+  return data as { document: AiDocumentSummary };
+}
+
+export async function uploadAiChatDocumentRequest(token: string, chatId: string, file: File) {
+  if (isDemoMode) {
+    return demoApi.uploadAiChatDocument(chatId, file);
+  }
+
+  const formData = new FormData();
+  formData.set("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/ai-consult/chats/${chatId}/documents`, {
     method: "POST",
     headers: authHeaders(token),
     body: formData,
@@ -832,6 +903,18 @@ export async function askAiDocumentRequest(token: string, id: string | null, que
   const path = id ? `/ai-consult/documents/${id}/questions` : "/ai-consult/questions";
 
   return apiRequest<{ answer: AiQuestionAnswer }>(path, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({ question }),
+  });
+}
+
+export async function askAiChatRequest(token: string, chatId: string, question: string) {
+  if (isDemoMode) {
+    return demoApi.askAiChat(chatId, question);
+  }
+
+  return apiRequest<{ answer: AiQuestionAnswer }>(`/ai-consult/chats/${chatId}/questions`, {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ question }),

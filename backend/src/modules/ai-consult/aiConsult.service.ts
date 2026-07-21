@@ -268,13 +268,19 @@ export async function parseUploadedDocument(file: Express.Multer.File): Promise<
   return { text, structured, summary: createSummary({ text, structured }, file.originalname) };
 }
 
-export async function createAiDocument(organizationId: string, uploadedById: string | null, file: Express.Multer.File) {
+export async function createAiDocument(
+  organizationId: string,
+  uploadedById: string | null,
+  file: Express.Multer.File,
+  chatId: string | null = null,
+) {
   const parsed = await parseUploadedDocument(file);
   const extension = extensionOf(file.originalname);
 
   const document = await prisma.aiDocument.create({
     data: {
       organizationId,
+      chatId,
       uploadedById,
       fileName: file.originalname,
       mimeType: file.mimetype,
@@ -298,6 +304,90 @@ export async function listAiDocuments(organizationId: string) {
   });
 
   return documents.map(mapDocument);
+}
+
+export async function listAiChats(organizationId: string) {
+  const chats = await prisma.aiChat.findMany({
+    where: { organizationId },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      _count: { select: { documents: true, questions: true } },
+      documents: {
+        orderBy: { createdAt: "desc" },
+        take: 3,
+        select: { fileName: true },
+      },
+    },
+  });
+
+  return chats.map(mapChat);
+}
+
+export async function createAiChat(organizationId: string, createdById: string | null, title: string) {
+  const chat = await prisma.aiChat.create({
+    data: {
+      organizationId,
+      createdById,
+      title: title.trim() || defaultChatTitle(),
+    },
+    include: {
+      _count: { select: { documents: true, questions: true } },
+      documents: {
+        orderBy: { createdAt: "desc" },
+        take: 3,
+        select: { fileName: true },
+      },
+    },
+  });
+
+  return mapChat(chat);
+}
+
+export async function getAiChat(organizationId: string, chatId: string) {
+  const chat = await prisma.aiChat.findFirst({
+    where: { id: chatId, organizationId },
+    include: {
+      documents: {
+        orderBy: { createdAt: "desc" },
+        include: { _count: { select: { questions: true } } },
+      },
+      questions: {
+        orderBy: { createdAt: "asc" },
+        take: 120,
+      },
+      _count: { select: { documents: true, questions: true } },
+    },
+  });
+
+  if (!chat) {
+    const error = new Error("Chat no encontrado.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+
+  return {
+    ...mapChat(chat),
+    documents: chat.documents.map(mapDocument),
+    questions: chat.questions.map((question) => ({
+      id: question.id,
+      question: question.question,
+      answer: question.answer,
+      context: question.context,
+      createdAt: question.createdAt,
+    })),
+  };
+}
+
+export async function uploadAiChatDocument(
+  organizationId: string,
+  chatId: string,
+  uploadedById: string | null,
+  file: Express.Multer.File,
+) {
+  await ensureAiChat(organizationId, chatId);
+  const document = await createAiDocument(organizationId, uploadedById, file, chatId);
+  await prisma.aiChat.update({ where: { id: chatId }, data: { updatedAt: new Date() } });
+  return document;
 }
 
 export async function getAiDocument(organizationId: string, id: string) {
@@ -347,6 +437,7 @@ export async function askAiDocument(
   const saved = await prisma.aiQuestion.create({
     data: {
       documentId,
+      chatId: document.chatId,
       askedById,
       question,
       answer: result.answer,
@@ -406,12 +497,72 @@ export async function askAiWorkspace(organizationId: string, askedById: string |
   };
 }
 
+export async function askAiChat(organizationId: string, chatId: string, askedById: string | null, question: string) {
+  const chat = await prisma.aiChat.findFirst({
+    where: { id: chatId, organizationId },
+    include: {
+      documents: {
+        orderBy: { createdAt: "desc" },
+        take: 25,
+      },
+    },
+  });
+
+  if (!chat) {
+    const error = new Error("Chat no encontrado.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+
+  if (!chat.documents.length) {
+    const error = new Error("Sube cotizaciones a este chat antes de preguntar.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+
+  const result = await answerAcrossDocuments(
+    organizationId,
+    chat.documents.map((document) => ({
+      id: document.id,
+      fileName: document.fileName,
+      extractedText: document.extractedText,
+      structured: document.structuredJson as unknown as StructuredDocument | null,
+    })),
+    question,
+  );
+
+  const saved = await prisma.aiQuestion.create({
+    data: {
+      documentId: result.documentId ?? chat.documents[0].id,
+      chatId,
+      askedById,
+      question,
+      answer: result.answer,
+      context: toJson(result.context),
+    },
+  });
+
+  await prisma.aiChat.update({
+    where: { id: chatId },
+    data: { updatedAt: saved.createdAt },
+  });
+
+  return {
+    id: saved.id,
+    question: saved.question,
+    answer: saved.answer,
+    context: result.context,
+    createdAt: saved.createdAt,
+  };
+}
+
 function mapDocument(document: any) {
   const structured = document.structuredJson as unknown as StructuredDocument | null;
   const sheets = structured?.sheets ?? [];
 
   return {
     id: document.id,
+    chatId: document.chatId ?? null,
     fileName: document.fileName,
     mimeType: document.mimeType,
     extension: document.extension,
@@ -422,6 +573,35 @@ function mapDocument(document: any) {
     rowCount: sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0),
     questionCount: document._count?.questions ?? 0,
   };
+}
+
+function mapChat(chat: any) {
+  return {
+    id: chat.id,
+    title: chat.title,
+    createdAt: chat.createdAt,
+    updatedAt: chat.updatedAt,
+    documentCount: chat._count?.documents ?? 0,
+    questionCount: chat._count?.questions ?? 0,
+    recentFiles: (chat.documents ?? []).map((document: { fileName: string }) => document.fileName),
+  };
+}
+
+async function ensureAiChat(organizationId: string, chatId: string) {
+  const chat = await prisma.aiChat.findFirst({
+    where: { id: chatId, organizationId },
+    select: { id: true },
+  });
+
+  if (!chat) {
+    const error = new Error("Chat no encontrado.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+}
+
+function defaultChatTitle() {
+  return `Cotizaciones ${new Intl.DateTimeFormat("es-DO", { day: "2-digit", month: "short" }).format(new Date())}`;
 }
 
 function toJson(value: unknown) {

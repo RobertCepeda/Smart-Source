@@ -1,5 +1,7 @@
 import type {
   AdminOverview,
+  AiChatDetail,
+  AiChatSummary,
   AiDocumentDetail,
   AiDocumentSummary,
   AiQuestionAnswer,
@@ -303,6 +305,7 @@ let supportTickets: SupportTicket[] = [
 let aiDocuments: AiDocumentDetail[] = [
   {
     id: "ai_demo_doc",
+    chatId: "chat_demo_today",
     fileName: "reporte-demo-compras.csv",
     mimeType: "text/csv",
     extension: "csv",
@@ -324,6 +327,22 @@ let aiDocuments: AiDocumentDetail[] = [
     ],
   },
 ];
+
+let aiChats: AiChatSummary[] = [
+  {
+    id: "chat_demo_today",
+    title: "Cotizaciones de hoy",
+    createdAt: now,
+    updatedAt: now,
+    documentCount: 1,
+    questionCount: 1,
+    recentFiles: ["reporte-demo-compras.csv"],
+  },
+];
+
+let aiChatQuestions: Record<string, AiQuestionAnswer[]> = {
+  chat_demo_today: aiDocuments[0].questions,
+};
 
 export const demoApi = {
   getHealth: () => ok<HealthResponse>({ app: "Smart Source", status: "ok", module: "static-demo" }),
@@ -481,6 +500,22 @@ export const demoApi = {
   getPriceHistory: (filters: { itemId?: string; supplierId?: string } = {}) => ok(makePriceHistory(filters)),
   getReportsSummary: () => ok(makeReportsSummary()),
   listAiDocuments: () => ok({ documents: aiDocuments.map(toAiSummary) }),
+  listAiChats: () => ok({ chats: aiChats.map(toAiChatSummary) }),
+  createAiChat: (title: string) => {
+    const chat: AiChatSummary = {
+      id: `chat_${Date.now()}`,
+      title: title.trim() || "Cotizaciones de hoy",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      documentCount: 0,
+      questionCount: 0,
+      recentFiles: [],
+    };
+    aiChats = [chat, ...aiChats];
+    aiChatQuestions[chat.id] = [];
+    return ok({ chat });
+  },
+  getAiChat: (id: string) => ok({ chat: toAiChatDetail(aiChats.find((chat) => chat.id === id) ?? aiChats[0]) }),
   uploadAiDocument: async (file: File) => {
     const text = await file.text().catch(() => "");
     const rowCount = Math.max(0, text.split(/\r?\n/).filter(Boolean).length - 1);
@@ -501,6 +536,28 @@ export const demoApi = {
     aiDocuments = [document, ...aiDocuments];
     return clone({ document: toAiSummary(document) });
   },
+  uploadAiChatDocument: async (chatId: string, file: File) => {
+    const text = await file.text().catch(() => "");
+    const rowCount = Math.max(0, text.split(/\r?\n/).filter(Boolean).length - 1);
+    const document: AiDocumentDetail = {
+      id: `ai_${Date.now()}`,
+      chatId,
+      fileName: file.name,
+      mimeType: file.type || null,
+      extension: file.name.split(".").pop()?.toLowerCase() || null,
+      sizeBytes: file.size,
+      summary: `Documento demo importado. Se detectaron ${rowCount} filas o lineas utiles para vista previa.`,
+      createdAt: new Date().toISOString(),
+      sheetCount: rowCount ? 1 : 0,
+      rowCount,
+      questionCount: 0,
+      extractedTextPreview: text.slice(0, 1800) || "Vista previa estatica: el archivo quedo cargado para demostracion.",
+      questions: [],
+    };
+    aiDocuments = [document, ...aiDocuments];
+    touchAiChat(chatId);
+    return clone({ document: toAiSummary(document) });
+  },
   getAiDocument: (id: string) => ok({ document: aiDocuments.find((document) => document.id === id) ?? aiDocuments[0] }),
   askAiDocument: (id: string, question: string) => {
     const document = id === "all" ? aiDocuments[0] : aiDocuments.find((entry) => entry.id === id) ?? aiDocuments[0];
@@ -512,6 +569,17 @@ export const demoApi = {
     };
     document.questions = [answer, ...document.questions];
     document.questionCount = document.questions.length;
+    return ok({ answer });
+  },
+  askAiChat: (chatId: string, question: string) => {
+    const answer: AiQuestionAnswer = {
+      id: `ai_q_${Date.now()}`,
+      question,
+      answer: answerWorkspaceQuestion(question),
+      createdAt: new Date().toISOString(),
+    };
+    aiChatQuestions[chatId] = [...(aiChatQuestions[chatId] ?? []), answer];
+    touchAiChat(chatId);
     return ok({ answer });
   },
   getOrganizationWorkspace: () =>
@@ -845,6 +913,30 @@ function makeSearch(query: string): SmartSearchResponse {
 function toAiSummary(document: AiDocumentDetail): AiDocumentSummary {
   const { extractedTextPreview: _preview, questions: _questions, ...summary } = document;
   return summary;
+}
+
+function toAiChatSummary(chat: AiChatSummary): AiChatSummary {
+  const documents = aiDocuments.filter((document) => document.chatId === chat.id);
+  const questions = aiChatQuestions[chat.id] ?? [];
+
+  return {
+    ...chat,
+    documentCount: documents.length,
+    questionCount: questions.length,
+    recentFiles: documents.slice(0, 3).map((document) => document.fileName),
+  };
+}
+
+function toAiChatDetail(chat: AiChatSummary): AiChatDetail {
+  return {
+    ...toAiChatSummary(chat),
+    documents: aiDocuments.filter((document) => document.chatId === chat.id).map(toAiSummary),
+    questions: aiChatQuestions[chat.id] ?? [],
+  };
+}
+
+function touchAiChat(chatId: string) {
+  aiChats = aiChats.map((chat) => (chat.id === chatId ? { ...chat, updatedAt: new Date().toISOString() } : chat));
 }
 
 function answerDocumentQuestion(document: AiDocumentDetail, question: string) {
