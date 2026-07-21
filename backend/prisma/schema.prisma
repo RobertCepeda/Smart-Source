@@ -1,0 +1,358 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String       @id @default(cuid())
+  organizationId String?
+  name         String
+  email        String       @unique
+  passwordHash String?
+  company      String?
+  avatarUrl    String?
+  role         UserRole     @default(CLIENT)
+  authProvider AuthProvider @default(EMAIL)
+  googleId     String?      @unique
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  lastLoginAt  DateTime?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  supportMessages SupportMessage[]
+  requestedTickets SupportTicket[] @relation("TicketRequester")
+  aiDocuments AiDocument[]
+  aiQuestions AiQuestion[]
+
+  @@index([email])
+  @@index([organizationId])
+}
+
+model Organization {
+  id          String             @id @default(cuid())
+  name        String
+  slug        String             @unique
+  billingEmail String?
+  status      OrganizationStatus @default(ACTIVE)
+  accountType AccountType        @default(PERSONAL)
+  plan        String             @default("STARTER")
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  users       User[]
+  suppliers   Supplier[]
+  categories  Category[]
+  brands      Brand[]
+  items       Item[]
+  supportTickets SupportTicket[]
+  aiDocuments AiDocument[]
+
+  @@index([name])
+}
+
+enum AccountType {
+  PERSONAL
+  BUSINESS
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+enum UserRole {
+  SYSTEM_ADMIN
+  ADMIN
+  CLIENT
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+}
+
+model Supplier {
+  id           String         @id @default(cuid())
+  organizationId String?
+  name         String
+  rnc          String?
+  category     String?
+  city         String?
+  address      String?
+  phone        String?
+  whatsapp     String?
+  email        String?
+  website      String?
+  instagram    String?
+  facebook     String?
+  notes        String?
+  rating       Int?           @default(0)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  contacts     Contact[]
+  items        SupplierItem[]
+  tags         SupplierTag[]
+  orders       PurchaseOrder[]
+  priceHistory PriceHistory[]
+  organization Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([name])
+  @@index([city])
+  @@index([category])
+  @@index([organizationId])
+}
+
+model SupportTicket {
+  id             String              @id @default(cuid())
+  organizationId String
+  requesterId    String?
+  subject        String
+  category       SupportCategory     @default(SOPORTE)
+  priority       SupportPriority     @default(NORMAL)
+  status         SupportTicketStatus @default(ABIERTO)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requester      User?               @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  messages       SupportMessage[]
+
+  @@index([organizationId])
+  @@index([requesterId])
+  @@index([status])
+}
+
+model SupportMessage {
+  id        String              @id @default(cuid())
+  ticketId  String
+  authorId  String?
+  authorType SupportAuthorType
+  body      String
+  createdAt DateTime            @default(now())
+
+  ticket    SupportTicket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    User?               @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([authorId])
+}
+
+enum SupportCategory {
+  SOPORTE
+  MANTENIMIENTO
+  FACTURACION
+  IDEA
+}
+
+enum SupportPriority {
+  BAJA
+  NORMAL
+  ALTA
+}
+
+enum SupportTicketStatus {
+  ABIERTO
+  EN_REVISION
+  RESUELTO
+  CERRADO
+}
+
+enum SupportAuthorType {
+  CLIENTE
+  ADMIN
+  AUTOMATICO
+}
+
+model Contact {
+  id         String   @id @default(cuid())
+  supplierId String
+  name       String
+  role       String?
+  phone      String?
+  whatsapp   String?
+  email      String?
+  isPrimary  Boolean  @default(false)
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([name])
+  @@index([supplierId])
+}
+
+model Category {
+  id    String @id @default(cuid())
+  organizationId String?
+  name  String
+  items Item[]
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Brand {
+  id    String @id @default(cuid())
+  organizationId String?
+  name  String
+  items Item[]
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Item {
+  id           String              @id @default(cuid())
+  organizationId String?
+  name         String
+  type         ItemType
+  unit         String?
+  categoryId   String?
+  brandId      String?
+  description  String?
+  category     Category?           @relation(fields: [categoryId], references: [id])
+  brand        Brand?              @relation(fields: [brandId], references: [id])
+  organization Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  suppliers    SupplierItem[]
+  orderLines   PurchaseOrderLine[]
+  priceHistory PriceHistory[]
+  isActive     Boolean             @default(true)
+
+  @@index([name])
+  @@index([type])
+  @@index([organizationId])
+}
+
+enum ItemType {
+  MATERIAL
+  SERVICIO
+}
+
+model SupplierItem {
+  supplierId   String
+  itemId       String
+  lastPrice    Decimal? @db.Decimal(12, 2)
+  currency     String   @default("DOP")
+  leadTimeDays Int?
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([supplierId, itemId])
+}
+
+model Tag {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  suppliers SupplierTag[]
+}
+
+model SupplierTag {
+  supplierId String
+  tagId      String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([supplierId, tagId])
+}
+
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  number     String              @unique
+  supplierId String
+  status     OrderStatus         @default(BORRADOR)
+  issueDate  DateTime            @default(now())
+  currency   String              @default("DOP")
+  subtotal   Decimal             @default(0) @db.Decimal(12, 2)
+  tax        Decimal             @default(0) @db.Decimal(12, 2)
+  total      Decimal             @default(0) @db.Decimal(12, 2)
+  notes      String?
+  supplier   Supplier            @relation(fields: [supplierId], references: [id])
+  lines      PurchaseOrderLine[]
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([issueDate])
+}
+
+enum OrderStatus {
+  BORRADOR
+  ENVIADA
+  RECIBIDA
+  CANCELADA
+}
+
+model PurchaseOrderLine {
+  id        String        @id @default(cuid())
+  orderId   String
+  itemId    String
+  quantity  Decimal       @db.Decimal(12, 2)
+  unitPrice Decimal       @db.Decimal(12, 2)
+  lineTotal Decimal       @db.Decimal(12, 2)
+  order     PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item      Item          @relation(fields: [itemId], references: [id])
+
+  @@index([orderId])
+  @@index([itemId])
+}
+
+model PriceHistory {
+  id         String   @id @default(cuid())
+  itemId     String
+  supplierId String
+  price      Decimal  @db.Decimal(12, 2)
+  currency   String   @default("DOP")
+  recordedAt DateTime @default(now())
+  source     String?
+  item       Item     @relation(fields: [itemId], references: [id])
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([itemId])
+  @@index([supplierId])
+  @@index([recordedAt])
+}
+
+model AiDocument {
+  id             String       @id @default(cuid())
+  organizationId String
+  uploadedById   String?
+  fileName       String
+  mimeType       String?
+  extension      String?
+  sizeBytes      Int
+  extractedText  String       @db.Text
+  structuredJson Json?
+  summary        String       @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy     User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  questions      AiQuestion[]
+
+  @@index([organizationId])
+  @@index([uploadedById])
+  @@index([createdAt])
+}
+
+model AiQuestion {
+  id         String     @id @default(cuid())
+  documentId String
+  askedById  String?
+  question   String     @db.Text
+  answer     String     @db.Text
+  context    Json?
+  createdAt  DateTime   @default(now())
+
+  document   AiDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  askedBy    User?      @relation(fields: [askedById], references: [id], onDelete: SetNull)
+
+  @@index([documentId])
+  @@index([askedById])
+  @@index([createdAt])
+}
