@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, FileText, Loader2, MessageSquarePlus, Paperclip, Plus, Send, Sparkles, Upload } from "lucide-react";
+import { Bot, FileText, Loader2, MessageSquarePlus, Paperclip, Plus, Send, Sparkles, Upload, X } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -10,6 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   askAiChatRequest,
   createAiChatRequest,
+  deleteAiDocumentRequest,
   getAiChatRequest,
   listAiChatsRequest,
   uploadAiChatDocumentRequest,
@@ -86,6 +87,17 @@ export function AiConsult() {
     onError: (error) => {
       setNotice(error instanceof Error ? error.message : "No pude responder esa pregunta.");
       setPendingQuestion(null);
+    },
+  });
+
+  const deleteDocumentMutation = useMutation({
+    mutationFn: (documentId: string) => deleteAiDocumentRequest(token!, documentId),
+    onSuccess: async ({ document }) => {
+      await queryClient.invalidateQueries({ queryKey: ["ai-chat", document.chatId ?? selectedChatId] });
+      await queryClient.invalidateQueries({ queryKey: ["ai-chats"] });
+    },
+    onError: (error) => {
+      setNotice(error instanceof Error ? error.message : "No pude eliminar ese documento.");
     },
   });
 
@@ -291,7 +303,12 @@ export function AiConsult() {
 
               <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                 {documents.map((document) => (
-                  <DocumentChip key={document.id} document={document} />
+                  <DocumentChip
+                    key={document.id}
+                    document={document}
+                    isDeleting={deleteDocumentMutation.isPending && deleteDocumentMutation.variables === document.id}
+                    onDelete={() => deleteDocumentMutation.mutate(document.id)}
+                  />
                 ))}
                 {!documents.length ? <EmptyState text="Sube PDFs, Excel o CSV para iniciar el análisis." /> : null}
               </div>
@@ -391,9 +408,27 @@ function ChatButton({ chat, isActive, onClick }: { chat: AiChatSummary; isActive
   );
 }
 
-function DocumentChip({ document }: { document: AiDocumentSummary }) {
+function DocumentChip({
+  document,
+  isDeleting,
+  onDelete,
+}: {
+  document: AiDocumentSummary;
+  isDeleting: boolean;
+  onDelete: () => void;
+}) {
   return (
-    <div className="flex min-w-[220px] items-start gap-2 rounded-lg border border-border bg-white p-2.5">
+    <div className="group relative flex min-w-[220px] items-start gap-2 rounded-lg border border-border bg-white p-2.5 pr-7">
+      <button
+        type="button"
+        className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
+        title="Eliminar documento"
+        aria-label={`Eliminar ${document.fileName}`}
+        disabled={isDeleting}
+        onClick={onDelete}
+      >
+        {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+      </button>
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-brand-700">
         <FileText className="h-4 w-4" />
       </span>

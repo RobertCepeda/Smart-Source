@@ -417,6 +417,42 @@ export async function getAiDocument(organizationId: string, id: string) {
   };
 }
 
+export async function deleteAiDocument(organizationId: string, id: string) {
+  const document = await prisma.aiDocument.findFirst({
+    where: { id, organizationId },
+    select: { id: true, chatId: true },
+  });
+
+  if (!document) {
+    const error = new Error("Documento no encontrado.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+
+  if (document.chatId) {
+    const fallbackDocument = await prisma.aiDocument.findFirst({
+      where: { organizationId, chatId: document.chatId, id: { not: id } },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (fallbackDocument) {
+      await prisma.aiQuestion.updateMany({
+        where: { documentId: id },
+        data: { documentId: fallbackDocument.id },
+      });
+    }
+  }
+
+  await prisma.aiDocument.delete({ where: { id } });
+
+  if (document.chatId) {
+    await prisma.aiChat.update({ where: { id: document.chatId }, data: { updatedAt: new Date() } });
+  }
+
+  return { id, chatId: document.chatId };
+}
+
 export async function askAiDocument(
   organizationId: string,
   documentId: string,

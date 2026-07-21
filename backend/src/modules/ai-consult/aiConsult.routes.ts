@@ -9,6 +9,7 @@ import {
   askAiWorkspace,
   createAiChat,
   createAiDocument,
+  deleteAiDocument,
   getAiChat,
   getAiDocument,
   listAiChats,
@@ -123,6 +124,15 @@ aiConsultRouter.get("/documents/:id", validate({ params: aiDocumentParamsSchema 
   try {
     const { id } = aiDocumentParamsSchema.parse(req.params);
     res.json({ document: await getAiDocument(organizationId(req), id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiConsultRouter.delete("/documents/:id", validate({ params: aiDocumentParamsSchema }), async (req, res, next) => {
+  try {
+    const { id } = aiDocumentParamsSchema.parse(req.params);
+    res.json({ document: await deleteAiDocument(organizationId(req), id) });
   } catch (error) {
     next(error);
   }

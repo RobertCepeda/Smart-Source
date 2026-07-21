@@ -558,6 +558,19 @@ export const demoApi = {
     touchAiChat(chatId);
     return clone({ document: toAiSummary(document) });
   },
+  deleteAiDocument: (id: string) => {
+    const document = aiDocuments.find((entry) => entry.id === id);
+    aiDocuments = aiDocuments.filter((entry) => entry.id !== id);
+
+    if (document?.chatId) {
+      aiChatQuestions[document.chatId] = (aiChatQuestions[document.chatId] ?? []).filter(
+        (question) => question.id !== id,
+      );
+      touchAiChat(document.chatId);
+    }
+
+    return ok({ document: { id, chatId: document?.chatId ?? null } });
+  },
   getAiDocument: (id: string) => ok({ document: aiDocuments.find((document) => document.id === id) ?? aiDocuments[0] }),
   askAiDocument: (id: string, question: string) => {
     const document = id === "all" ? aiDocuments[0] : aiDocuments.find((entry) => entry.id === id) ?? aiDocuments[0];

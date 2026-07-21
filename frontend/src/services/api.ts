@@ -885,6 +885,17 @@ export async function uploadAiChatDocumentRequest(token: string, chatId: string,
   return data as { document: AiDocumentSummary };
 }
 
+export async function deleteAiDocumentRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.deleteAiDocument(id);
+  }
+
+  return apiRequest<{ document: { id: string; chatId: string | null } }>(`/ai-consult/documents/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+}
+
 export async function getAiDocumentRequest(token: string, id: string) {
   if (isDemoMode) {
     return demoApi.getAiDocument(id);
