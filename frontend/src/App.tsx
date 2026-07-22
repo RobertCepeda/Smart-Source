@@ -12,6 +12,7 @@ import { Organizations } from "./pages/Organizations";
 import { PriceHistory } from "./pages/PriceHistory";
 import { PurchaseHistory } from "./pages/PurchaseHistory";
 import { PurchaseOrders } from "./pages/PurchaseOrders";
+import { QuoteRequests } from "./pages/QuoteRequests";
 import { Registration } from "./pages/Registration";
 import { Reports } from "./pages/Reports";
 import { Settings } from "./pages/Settings";
@@ -73,6 +74,7 @@ function App() {
             <Route path="/search" element={<SmartSearch />} />
             <Route path="/registration" element={<Registration />} />
             <Route path="/purchase-orders" element={<PurchaseOrders />} />
+            <Route path="/quote-requests" element={<QuoteRequests />} />
             <Route path="/purchase-history" element={<PurchaseHistory />} />
             <Route path="/price-history" element={<PriceHistory />} />
             <Route path="/reports" element={<Reports />} />

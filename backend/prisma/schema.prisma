@@ -28,6 +28,7 @@ model User {
   aiChats AiChat[]
   aiDocuments AiDocument[]
   aiQuestions AiQuestion[]
+  quoteRequests QuoteRequest[]
 
   @@index([email])
   @@index([organizationId])
@@ -53,6 +54,7 @@ model Organization {
   aiChats AiChat[]
   aiDocuments AiDocument[]
   aiProductAliases AiProductAlias[]
+  quoteRequests QuoteRequest[]
 
   @@index([name])
 }
@@ -288,6 +290,71 @@ enum OrderStatus {
   ENVIADA
   RECIBIDA
   CANCELADA
+}
+
+model QuoteRequest {
+  id             String             @id @default(cuid())
+  organizationId String
+  requesterId    String?
+  number         String             @unique
+  status         QuoteRequestStatus @default(BORRADOR)
+  project        String
+  costCenter     String?
+  requesterName  String
+  deadline       DateTime?
+  observations   String?            @db.Text
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requester      User?              @relation(fields: [requesterId], references: [id], onDelete: SetNull)
+  items          QuoteRequestItem[]
+  attachments    QuoteRequestAttachment[]
+
+  @@index([organizationId])
+  @@index([requesterId])
+  @@index([number])
+  @@index([status])
+  @@index([deadline])
+  @@index([createdAt])
+}
+
+enum QuoteRequestStatus {
+  BORRADOR
+  LISTA_PARA_ENVIAR
+  ENVIADA
+  RECIBIENDO_COTIZACIONES
+  CERRADA
+  CANCELADA
+}
+
+model QuoteRequestItem {
+  id             String       @id @default(cuid())
+  quoteRequestId String
+  lineNumber     Int
+  description    String
+  quantity       Decimal      @db.Decimal(12, 2)
+  unit           String
+  technicalSpecs String?      @db.Text
+  createdAt      DateTime     @default(now())
+
+  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+
+  @@index([quoteRequestId])
+}
+
+model QuoteRequestAttachment {
+  id             String       @id @default(cuid())
+  quoteRequestId String
+  fileName       String
+  mimeType       String?
+  sizeBytes      Int
+  content        Bytes
+  createdAt      DateTime     @default(now())
+
+  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+
+  @@index([quoteRequestId])
 }
 
 model PurchaseOrderLine {

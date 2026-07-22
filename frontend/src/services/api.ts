@@ -319,6 +319,68 @@ export type PurchaseOrderFilters = {
   search?: string;
 };
 
+export type QuoteRequestStatus =
+  | "BORRADOR"
+  | "LISTA_PARA_ENVIAR"
+  | "ENVIADA"
+  | "RECIBIENDO_COTIZACIONES"
+  | "CERRADA"
+  | "CANCELADA";
+
+export type QuoteRequestItem = {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantity: string;
+  unit: string;
+  technicalSpecs: string | null;
+};
+
+export type QuoteRequestAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  createdAt: string;
+};
+
+export type QuoteRequest = {
+  id: string;
+  number: string;
+  status: QuoteRequestStatus;
+  project: string;
+  costCenter: string | null;
+  requesterName: string;
+  deadline: string | null;
+  observations: string | null;
+  createdAt: string;
+  updatedAt: string;
+  requester: Pick<AuthUser, "id" | "name" | "email"> | null;
+  items: QuoteRequestItem[];
+  attachments: QuoteRequestAttachment[];
+  itemCount: number;
+  attachmentCount: number;
+};
+
+export type QuoteRequestPayload = {
+  project: string;
+  costCenter?: string;
+  requesterName?: string;
+  deadline?: string;
+  observations?: string;
+  items: Array<{
+    description: string;
+    quantity: number;
+    unit: string;
+    technicalSpecs?: string;
+  }>;
+};
+
+export type QuoteRequestFilters = {
+  status?: QuoteRequestStatus;
+  search?: string;
+};
+
 export type PricePoint = {
   id: string;
   itemId: string;
@@ -771,6 +833,50 @@ export async function updatePurchaseOrderStatusRequest(
     method: "PUT",
     headers: authHeaders(token),
     body: JSON.stringify({ status }),
+  });
+}
+
+export async function listQuoteRequestsRequest(token: string, filters: QuoteRequestFilters = {}) {
+  if (isDemoMode) {
+    return demoApi.listQuoteRequests(filters);
+  }
+
+  return apiRequest<{ requests: QuoteRequest[] }>(`/quote-requests${queryString(filters)}`, {
+    headers: authHeaders(token),
+  });
+}
+
+export async function createQuoteRequestRequest(token: string, payload: QuoteRequestPayload, attachments: File[] = []) {
+  if (isDemoMode) {
+    return demoApi.createQuoteRequest(payload, attachments);
+  }
+
+  const formData = new FormData();
+  formData.set("data", JSON.stringify(payload));
+  attachments.forEach((file) => formData.append("attachments", file));
+
+  const response = await fetch(`${API_BASE_URL}/quote-requests`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: formData,
+  });
+
+  const data = (await response.json().catch(() => ({}))) as { message?: string };
+
+  if (!response.ok) {
+    throw new Error(data.message ?? "No pudimos crear la solicitud de cotización.");
+  }
+
+  return data as { request: QuoteRequest };
+}
+
+export async function getQuoteRequestRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.getQuoteRequest(id);
+  }
+
+  return apiRequest<{ request: QuoteRequest }>(`/quote-requests/${id}`, {
+    headers: authHeaders(token),
   });
 }
 

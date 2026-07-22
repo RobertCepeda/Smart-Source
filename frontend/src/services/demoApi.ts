@@ -19,6 +19,9 @@ import type {
   PurchaseOrder,
   PurchaseOrderFilters,
   PurchaseOrderPayload,
+  QuoteRequest,
+  QuoteRequestFilters,
+  QuoteRequestPayload,
   ReportsSummaryResponse,
   SmartSearchResponse,
   Supplier,
@@ -280,6 +283,16 @@ let purchaseOrders: PurchaseOrder[] = [
   makeOrder("po_5", "OC-2026-005", "sup_ferreteria", "RECIBIDA", [{ itemId: "item_maintenance", quantity: 10, unitPrice: 950 }]),
 ];
 
+let quoteRequests: QuoteRequest[] = [
+  makeQuoteRequest("qr_1", "SC-2026-00001", "Torre Norte - Eléctrico", "CC-204", [
+    { description: "Cable eléctrico THHN 12 rojo", quantity: 120, unit: "metro", technicalSpecs: "Certificación UL, cobre, color rojo." },
+    { description: "Breaker 2 polos 40A", quantity: 6, unit: "unidad", technicalSpecs: "Compatible con panel existente." },
+  ]),
+  makeQuoteRequest("qr_2", "SC-2026-00002", "Oficina principal", "ADM-010", [
+    { description: "Material gastable mensual", quantity: 3, unit: "caja", technicalSpecs: "Papel, folders, lapiceros y etiquetas." },
+  ]),
+];
+
 let supportTickets: SupportTicket[] = [
   {
     id: "ticket_welcome",
@@ -497,6 +510,24 @@ export const demoApi = {
     order.status = status;
     return ok({ order });
   },
+  listQuoteRequests: (filters: QuoteRequestFilters = {}) =>
+    ok({ requests: quoteRequests.filter((request) => quoteRequestMatches(request, filters)) }),
+  createQuoteRequest: (payload: QuoteRequestPayload, attachments: File[] = []) => {
+    const request = makeQuoteRequest(
+      `qr_${Date.now()}`,
+      `SC-2026-${String(quoteRequests.length + 1).padStart(5, "0")}`,
+      payload.project,
+      payload.costCenter || null,
+      payload.items,
+      attachments,
+      payload.requesterName,
+      payload.deadline,
+      payload.observations,
+    );
+    quoteRequests = [request, ...quoteRequests];
+    return ok({ request });
+  },
+  getQuoteRequest: (id: string) => ok({ request: quoteRequests.find((request) => request.id === id) ?? quoteRequests[0] }),
   getPriceHistory: (filters: { itemId?: string; supplierId?: string } = {}) => ok(makePriceHistory(filters)),
   getReportsSummary: () => ok(makeReportsSummary()),
   listAiDocuments: () => ok({ documents: aiDocuments.map(toAiSummary) }),
@@ -694,6 +725,49 @@ function makeOrder(
   };
 }
 
+function makeQuoteRequest(
+  id: string,
+  number: string,
+  project: string,
+  costCenter: string | null,
+  lines: QuoteRequestPayload["items"],
+  files: File[] = [],
+  requesterName = demoUser.name,
+  deadline?: string,
+  observations?: string,
+): QuoteRequest {
+  return {
+    id,
+    number,
+    status: "BORRADOR",
+    project,
+    costCenter,
+    requesterName: requesterName || demoUser.name,
+    deadline: deadline ? `${deadline}T23:59:59.999Z` : null,
+    observations: observations || null,
+    createdAt: now,
+    updatedAt: now,
+    requester: { id: demoUser.id, name: demoUser.name, email: demoUser.email },
+    items: lines.map((line, index) => ({
+      id: `${id}_item_${index}`,
+      lineNumber: index + 1,
+      description: line.description,
+      quantity: Number(line.quantity).toFixed(2),
+      unit: line.unit,
+      technicalSpecs: line.technicalSpecs || null,
+    })),
+    attachments: files.map((file, index) => ({
+      id: `${id}_file_${index}`,
+      fileName: file.name,
+      mimeType: file.type || null,
+      sizeBytes: file.size,
+      createdAt: now,
+    })),
+    itemCount: lines.length,
+    attachmentCount: files.length,
+  };
+}
+
 function point(id: string, itemId: string, itemName: string, supplierId: string, supplierName: string, price: number, source: string): PricePoint {
   return { id, itemId, itemName, supplierId, supplierName, price, currency: "DOP", recordedAt: now, source };
 }
@@ -725,6 +799,18 @@ function orderMatches(order: PurchaseOrder, filters: PurchaseOrderFilters) {
     (!filters.status || order.status === filters.status) &&
     (!filters.supplierId || order.supplierId === filters.supplierId) &&
     (!search || order.number.toLowerCase().includes(search) || order.supplier.name.toLowerCase().includes(search))
+  );
+}
+
+function quoteRequestMatches(request: QuoteRequest, filters: QuoteRequestFilters) {
+  const search = filters.search?.toLowerCase();
+  return (
+    (!filters.status || request.status === filters.status) &&
+    (!search ||
+      request.number.toLowerCase().includes(search) ||
+      request.project.toLowerCase().includes(search) ||
+      request.costCenter?.toLowerCase().includes(search) ||
+      request.items.some((item) => item.description.toLowerCase().includes(search)))
   );
 }
 

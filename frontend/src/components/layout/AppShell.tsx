@@ -6,6 +6,7 @@ import {
   BrainCircuit,
   Building2,
   Command,
+  ClipboardList,
   Headphones,
   History,
   LayoutDashboard,
@@ -58,6 +59,7 @@ const navigationGroups: NavigationGroup[] = [
   {
     label: "Compras y análisis",
     items: [
+      { label: "Solicitudes", path: "/quote-requests", icon: ClipboardList },
       { label: "Órdenes", path: "/purchase-orders", icon: ShoppingCart },
       { label: "Historial", path: "/purchase-history", icon: History },
       { label: "Precios", path: "/price-history", icon: LineChart },
