@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   CalendarDays,
@@ -7,7 +8,6 @@ import {
   ClipboardList,
   Eye,
   FileText,
-  FileUp,
   Inbox,
   Mail,
   Paperclip,
@@ -34,7 +34,6 @@ import {
   getQuoteRequestRequest,
   listQuoteRequestsRequest,
   listSuppliersRequest,
-  registerSupplierQuoteRequest,
   type QuoteRequest,
   type QuoteRequestPayload,
   type QuoteRequestStatus,
@@ -91,10 +90,6 @@ export function QuoteRequests() {
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<QuoteRequestStatus | "">("");
   const [search, setSearch] = useState("");
-  const [quoteSupplierId, setQuoteSupplierId] = useState("");
-  const [quoteFile, setQuoteFile] = useState<File | null>(null);
-  const [quoteReceivedAt, setQuoteReceivedAt] = useState("");
-  const [quoteObservations, setQuoteObservations] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -132,12 +127,6 @@ export function QuoteRequests() {
 
   const selectedRequest = requestDetailQuery.data?.request ?? selectedRequestFromList;
 
-  useEffect(() => {
-    if (!quoteSupplierId && selectedRequest?.suppliers.length) {
-      setQuoteSupplierId(selectedRequest.suppliers[0].supplierId);
-    }
-  }, [quoteSupplierId, selectedRequest?.suppliers]);
-
   const stats = useMemo(
     () => ({
       total: requests.length,
@@ -161,7 +150,6 @@ export function QuoteRequests() {
       setAttachments([]);
       setSelectedSupplierIds([]);
       setSelectedRequestId(request.id);
-      setQuoteSupplierId(request.suppliers[0]?.supplierId ?? "");
       setViewMode("detail");
       queryClient.setQueryData(["quote-request", request.id], { request });
       await queryClient.invalidateQueries({ queryKey: ["quote-requests"] });
@@ -184,25 +172,8 @@ export function QuoteRequests() {
     onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos preparar el correo."),
   });
 
-  const quoteMutation = useMutation({
-    mutationFn: ({ requestId, supplierId, file, receivedAt, observations }: { requestId: string; supplierId: string; file: File; receivedAt?: string; observations?: string }) =>
-      registerSupplierQuoteRequest(token!, requestId, { supplierId, receivedAt, observations }, file),
-    onSuccess: async () => {
-      setNotice("Cotización registrada y analizada.");
-      setQuoteFile(null);
-      setQuoteObservations("");
-      setQuoteReceivedAt("");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["quote-requests"] }),
-        queryClient.invalidateQueries({ queryKey: ["quote-request", selectedRequestId] }),
-      ]);
-    },
-    onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos registrar la cotización."),
-  });
-
   function openRequest(request: QuoteRequest) {
     setSelectedRequestId(request.id);
-    setQuoteSupplierId(request.suppliers[0]?.supplierId ?? "");
     setViewMode("detail");
     setNotice(null);
   }
@@ -266,24 +237,6 @@ export function QuoteRequests() {
         items: validLines,
       },
       files: attachments,
-    });
-  }
-
-  function submitQuote(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setNotice(null);
-
-    if (!selectedRequest || !quoteSupplierId || !quoteFile) {
-      setNotice("Selecciona el suplidor y el archivo de cotización.");
-      return;
-    }
-
-    quoteMutation.mutate({
-      requestId: selectedRequest.id,
-      supplierId: quoteSupplierId,
-      file: quoteFile,
-      receivedAt: quoteReceivedAt,
-      observations: quoteObservations,
     });
   }
 
@@ -369,22 +322,12 @@ export function QuoteRequests() {
       {viewMode === "detail" ? (
         <QuoteRequestDetailPanel
           request={selectedRequest}
-          quoteSupplierId={quoteSupplierId}
-          quoteFile={quoteFile}
-          quoteReceivedAt={quoteReceivedAt}
-          quoteObservations={quoteObservations}
           isLoading={requestDetailQuery.isLoading}
           notice={notice}
           isEmailPending={emailMutation.isPending}
-          isQuotePending={quoteMutation.isPending}
           onBack={() => setViewMode("list")}
           onPrint={() => selectedRequest && printQuoteRequest(selectedRequest)}
           onGenerateEmail={(supplierId) => selectedRequest && emailMutation.mutate({ requestId: selectedRequest.id, supplierId })}
-          onQuoteSupplierChange={setQuoteSupplierId}
-          onQuoteFileChange={setQuoteFile}
-          onQuoteReceivedAtChange={setQuoteReceivedAt}
-          onQuoteObservationsChange={setQuoteObservations}
-          onSubmitQuote={submitQuote}
         />
       ) : null}
     </div>
@@ -650,40 +593,20 @@ function QuoteRequestsInbox({
 
 function QuoteRequestDetailPanel({
   request,
-  quoteSupplierId,
-  quoteFile,
-  quoteReceivedAt,
-  quoteObservations,
   isLoading,
   notice,
   isEmailPending,
-  isQuotePending,
   onBack,
   onPrint,
   onGenerateEmail,
-  onQuoteSupplierChange,
-  onQuoteFileChange,
-  onQuoteReceivedAtChange,
-  onQuoteObservationsChange,
-  onSubmitQuote,
 }: {
   request: QuoteRequest | null;
-  quoteSupplierId: string;
-  quoteFile: File | null;
-  quoteReceivedAt: string;
-  quoteObservations: string;
   isLoading: boolean;
   notice: string | null;
   isEmailPending: boolean;
-  isQuotePending: boolean;
   onBack: () => void;
   onPrint: () => void;
   onGenerateEmail: (supplierId: string) => void;
-  onQuoteSupplierChange: (value: string) => void;
-  onQuoteFileChange: (file: File | null) => void;
-  onQuoteReceivedAtChange: (value: string) => void;
-  onQuoteObservationsChange: (value: string) => void;
-  onSubmitQuote: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   if (isLoading && !request) {
     return <EmptyState text="Cargando detalle de la solicitud..." />;
@@ -795,55 +718,34 @@ function QuoteRequestDetailPanel({
 
         <Card>
           <CardHeader>
-            <h3 className="text-base font-bold text-ink">Recepción de cotizaciones</h3>
+            <h3 className="text-base font-bold text-ink">Análisis de documentos</h3>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <form className="grid gap-3 rounded-lg border border-border bg-slate-50 p-3 md:grid-cols-[1fr_150px] md:items-end" onSubmit={onSubmitQuote}>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Suplidor</span>
-                <select
-                  className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]"
-                  value={quoteSupplierId}
-                  onChange={(event) => onQuoteSupplierChange(event.target.value)}
-                >
-                  {request.suppliers.map((entry) => (
-                    <option key={entry.supplierId} value={entry.supplierId}>
-                      {entry.supplier.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Recepción</span>
-                <Input type="date" value={quoteReceivedAt} onChange={(event) => onQuoteReceivedAtChange(event.target.value)} />
-              </label>
-              <label className="block md:col-span-2">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Archivo original</span>
-                <input
-                  type="file"
-                  className="block w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px]"
-                  onChange={(event) => onQuoteFileChange(event.target.files?.[0] ?? null)}
-                />
-                {quoteFile ? <p className="mt-1 text-xs text-slate-500">{quoteFile.name} · {formatBytes(quoteFile.size)}</p> : null}
-              </label>
-              <label className="block md:col-span-2">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Observaciones</span>
-                <textarea
-                  className="min-h-16 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  value={quoteObservations}
-                  onChange={(event) => onQuoteObservationsChange(event.target.value)}
-                  placeholder="Notas internas sobre la cotización recibida."
-                />
-              </label>
-              <Button type="submit" disabled={isQuotePending || !request.suppliers.length} className="md:col-span-2">
-                <FileUp className="h-4 w-4" />
-                {isQuotePending ? "Analizando..." : "Registrar y analizar cotización"}
-              </Button>
-            </form>
+          <CardContent className="space-y-3">
+            <div className="rounded-lg border border-brand-100 bg-brand-50/60 p-4">
+              <div className="flex items-start gap-3">
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-brand-700">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-ink">La lectura de PDF, Excel e IA vive en Consultas IA.</p>
+                  <p className="mt-1 text-[13px] leading-5 text-slate-600">
+                    En este expediente dejamos la solicitud limpia: datos, suplidores, correos y comparación. Las cotizaciones se cargan y se analizan en el módulo de IA para mantener el flujo ordenado.
+                  </p>
+                </div>
+              </div>
+              <Link
+                to="/ai-consult"
+                className="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink px-3.5 text-[13px] font-semibold text-white transition hover:bg-slate-800"
+              >
+                <Sparkles className="h-4 w-4" />
+                Abrir Consultas IA
+              </Link>
+            </div>
 
-            <div className="space-y-2">
-              {request.quotes.length ? (
-                request.quotes.map((quote) => (
+            {request.quotes.length ? (
+              <div className="space-y-2">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Cotizaciones vinculadas</p>
+                {request.quotes.map((quote) => (
                   <div key={quote.id} className="rounded-lg border border-border p-3">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
@@ -852,13 +754,10 @@ function QuoteRequestDetailPanel({
                       </div>
                       <Badge tone={quote.reviewStatus === "ANALIZADA" ? "green" : "amber"}>{quote.reviewStatus}</Badge>
                     </div>
-                    <p className="mt-2 text-xs text-slate-500">{quote.lines.length} líneas detectadas</p>
                   </div>
-                ))
-              ) : (
-                <EmptyState text="Aún no hay cotizaciones registradas." />
-              )}
-            </div>
+                ))}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </section>
@@ -933,7 +832,7 @@ function ComparisonTable({ request }: { request: QuoteRequest }) {
       </CardHeader>
       <CardContent>
         {!request.suppliers.length ? <EmptyState text="Selecciona suplidores para construir el cuadro comparativo." /> : null}
-        {request.suppliers.length && !hasOffers ? <EmptyState text="Registra cotizaciones para ver precios, marcas, tiempos y diferencias." /> : null}
+        {request.suppliers.length && !hasOffers ? <EmptyState text="Procesa las cotizaciones en Consultas IA para alimentar esta comparación con precios, marcas, tiempos y diferencias." /> : null}
         {request.suppliers.length ? (
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="min-w-[980px] w-full border-collapse text-[12px]">
