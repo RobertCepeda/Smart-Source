@@ -216,12 +216,22 @@ export async function listSuppliers(organizationId: string, query: SupplierQuery
         ? {
             OR: [
               { name: { contains: search, mode: "insensitive" as const } },
+              { rnc: { contains: search, mode: "insensitive" as const } },
               { category: { contains: search, mode: "insensitive" as const } },
               { city: { contains: search, mode: "insensitive" as const } },
+              { address: { contains: search, mode: "insensitive" as const } },
+              { phone: { contains: search, mode: "insensitive" as const } },
+              { whatsapp: { contains: search, mode: "insensitive" as const } },
               { email: { contains: search, mode: "insensitive" as const } },
+              { website: { contains: search, mode: "insensitive" as const } },
+              { notes: { contains: search, mode: "insensitive" as const } },
               { contacts: { some: { name: { contains: search, mode: "insensitive" as const } } } },
+              { contacts: { some: { role: { contains: search, mode: "insensitive" as const } } } },
+              { contacts: { some: { phone: { contains: search, mode: "insensitive" as const } } } },
+              { contacts: { some: { whatsapp: { contains: search, mode: "insensitive" as const } } } },
               { contacts: { some: { email: { contains: search, mode: "insensitive" as const } } } },
               { items: { some: { item: { name: { contains: search, mode: "insensitive" as const } } } } },
+              { items: { some: { item: { unit: { contains: search, mode: "insensitive" as const } } } } },
               { tags: { some: { tag: { name: { contains: search, mode: "insensitive" as const } } } } },
             ],
           }

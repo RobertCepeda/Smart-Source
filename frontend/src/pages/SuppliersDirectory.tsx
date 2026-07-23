@@ -14,16 +14,14 @@ import { deleteSupplierRequest, listSuppliersRequest, type Supplier, type Suppli
 export function SuppliersDirectory() {
   const { token, user } = useAuth();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState<SupplierFilters>(() => ({
-    tag: searchParams.get("tag") ?? undefined,
+    search: searchParams.get("search") ?? searchParams.get("tag") ?? undefined,
   }));
 
   useEffect(() => {
-    setFilters((current) => ({
-      ...current,
-      tag: searchParams.get("tag") ?? undefined,
-    }));
+    const urlSearch = searchParams.get("search") ?? searchParams.get("tag") ?? undefined;
+    setFilters((current) => (current.search === urlSearch ? current : { search: urlSearch }));
   }, [searchParams]);
 
   const suppliersQuery = useQuery({
@@ -50,11 +48,16 @@ export function SuppliersDirectory() {
     };
   }, [suppliers]);
 
-  function updateFilter(key: keyof SupplierFilters, value: string) {
-    setFilters((current) => ({
-      ...current,
-      [key]: value || undefined,
-    }));
+  function updateSearch(value: string) {
+    setFilters({ search: value || undefined });
+    if (searchParams.has("search") || searchParams.has("tag")) {
+      setSearchParams({});
+    }
+  }
+
+  function clearFilters() {
+    setFilters({});
+    setSearchParams({});
   }
 
   function onDelete(supplier: Supplier) {
@@ -110,24 +113,17 @@ export function SuppliersDirectory() {
       </section>
 
       <Card>
-        <CardContent className="grid gap-3 p-4 lg:grid-cols-[1.4fr_1fr_1fr_1fr_auto]">
+        <CardContent className="grid gap-3 p-4 lg:grid-cols-[1fr_auto]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               className="pl-9"
-              placeholder="Buscar por nombre, vendedor, item o etiqueta"
+              placeholder="Buscar suplidor, vendedor, material, categoría, ciudad, etiqueta, correo o teléfono"
               value={filters.search ?? ""}
-              onChange={(event) => updateFilter("search", event.target.value)}
+              onChange={(event) => updateSearch(event.target.value)}
             />
           </div>
-          <Input
-            placeholder="Categoria"
-            value={filters.category ?? ""}
-            onChange={(event) => updateFilter("category", event.target.value)}
-          />
-          <Input placeholder="Ciudad" value={filters.city ?? ""} onChange={(event) => updateFilter("city", event.target.value)} />
-          <Input placeholder="Etiqueta" value={filters.tag ?? ""} onChange={(event) => updateFilter("tag", event.target.value)} />
-          <Button type="button" variant="outline" onClick={() => setFilters({})}>
+          <Button type="button" variant="outline" onClick={clearFilters}>
             <RotateCcw className="h-4 w-4" />
             Limpiar
           </Button>

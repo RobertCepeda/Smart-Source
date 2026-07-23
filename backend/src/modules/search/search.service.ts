@@ -258,7 +258,7 @@ export async function globalSearch(organizationId: string, rawQuery: string) {
         title: tag.name,
         subtitle: "Etiqueta de suplidores",
         description: `${tag.suppliers.length} suplidores relacionados`,
-        path: `/suppliers?tag=${encodeURIComponent(tag.name)}`,
+        path: `/suppliers?search=${encodeURIComponent(tag.name)}`,
         meta: ["Etiqueta"],
       })),
     },

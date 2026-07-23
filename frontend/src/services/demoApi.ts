@@ -1052,14 +1052,40 @@ function point(id: string, itemId: string, itemName: string, supplierId: string,
 }
 
 function supplierMatches(supplier: Supplier, filters: SupplierFilters) {
-  const search = filters.search?.toLowerCase();
+  const search = normalizeDemoSearch(filters.search);
+  const searchableFields = [
+    supplier.name,
+    supplier.rnc,
+    supplier.category,
+    supplier.city,
+    supplier.address,
+    supplier.phone,
+    supplier.whatsapp,
+    supplier.email,
+    supplier.website,
+    supplier.notes,
+    ...supplier.tags,
+    ...supplier.contacts.flatMap((contact) => [contact.name, contact.role, contact.phone, contact.whatsapp, contact.email]),
+    ...supplier.catalogItems.flatMap((item) => [item.name, item.type, item.unit, item.lastPrice, item.currency, item.leadTimeDays?.toString()]),
+  ];
+  const haystack = normalizeDemoSearch(searchableFields.filter(Boolean).join(" "));
+
   return (
     supplier.isActive &&
-    (!search || [supplier.name, supplier.category, supplier.city, supplier.email].some((value) => value?.toLowerCase().includes(search))) &&
+    (!search || haystack.includes(search)) &&
     (!filters.category || supplier.category === filters.category) &&
     (!filters.city || supplier.city === filters.city) &&
     (!filters.tag || supplier.tags.includes(filters.tag))
   );
+}
+
+function normalizeDemoSearch(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function itemMatches(item: CatalogItem, filters: CatalogFilters) {
