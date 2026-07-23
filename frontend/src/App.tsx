@@ -1,4 +1,5 @@
-import { BrowserRouter, HashRouter, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter, HashRouter, Route, Routes, useLocation } from "react-router-dom";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { PublicRoute } from "./components/auth/PublicRoute";
@@ -32,6 +33,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        <ScrollToTop />
         <Routes>
           <Route
             path="/login"
@@ -86,6 +88,16 @@ function App() {
       </AuthProvider>
     </Router>
   );
+}
+
+function ScrollToTop() {
+  const { pathname, search } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ left: 0, top: 0 });
+  }, [pathname, search]);
+
+  return null;
 }
 
 export default App;
