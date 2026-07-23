@@ -106,6 +106,9 @@ model Supplier {
   tags         SupplierTag[]
   orders       PurchaseOrder[]
   priceHistory PriceHistory[]
+  quoteRequestSuppliers QuoteRequestSupplier[]
+  quoteRequestEmailLogs QuoteRequestEmailLog[]
+  supplierQuotes SupplierQuote[]
   organization Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([name])
@@ -310,6 +313,9 @@ model QuoteRequest {
   requester      User?              @relation(fields: [requesterId], references: [id], onDelete: SetNull)
   items          QuoteRequestItem[]
   attachments    QuoteRequestAttachment[]
+  suppliers      QuoteRequestSupplier[]
+  emailLogs      QuoteRequestEmailLog[]
+  quotes         SupplierQuote[]
 
   @@index([organizationId])
   @@index([requesterId])
@@ -339,6 +345,7 @@ model QuoteRequestItem {
   createdAt      DateTime     @default(now())
 
   quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  quoteLines     SupplierQuoteLine[]
 
   @@index([quoteRequestId])
 }
@@ -355,6 +362,110 @@ model QuoteRequestAttachment {
   quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
 
   @@index([quoteRequestId])
+}
+
+model QuoteRequestSupplier {
+  id             String       @id @default(cuid())
+  quoteRequestId String
+  supplierId     String
+  contactName    String?
+  contactEmail   String?
+  contactPhone   String?
+  createdAt      DateTime     @default(now())
+
+  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([quoteRequestId, supplierId])
+  @@index([quoteRequestId])
+  @@index([supplierId])
+}
+
+model QuoteRequestEmailLog {
+  id             String           @id @default(cuid())
+  quoteRequestId String
+  supplierId     String?
+  recipientName  String?
+  recipientEmail String
+  subject        String
+  body           String           @db.Text
+  status         QuoteEmailStatus @default(GENERADO)
+  createdAt      DateTime         @default(now())
+
+  quoteRequest   QuoteRequest     @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  supplier       Supplier?        @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([quoteRequestId])
+  @@index([supplierId])
+  @@index([createdAt])
+}
+
+enum QuoteEmailStatus {
+  GENERADO
+  ENVIADO
+  FALLIDO
+}
+
+model SupplierQuote {
+  id             String              @id @default(cuid())
+  quoteRequestId String
+  supplierId     String
+  receivedAt     DateTime            @default(now())
+  fileName       String
+  mimeType       String?
+  sizeBytes      Int
+  content        Bytes
+  observations   String?             @db.Text
+  reviewStatus   SupplierQuoteStatus @default(ANALIZADA)
+  extractedText  String              @db.Text
+  analysisJson   Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  quoteRequest   QuoteRequest        @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  supplier       Supplier            @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  lines          SupplierQuoteLine[]
+
+  @@index([quoteRequestId])
+  @@index([supplierId])
+  @@index([receivedAt])
+  @@index([reviewStatus])
+}
+
+enum SupplierQuoteStatus {
+  RECIBIDA
+  ANALIZADA
+  EN_REVISION
+  APROBADA
+  DESCARTADA
+}
+
+model SupplierQuoteLine {
+  id                 String            @id @default(cuid())
+  supplierQuoteId    String
+  quoteRequestItemId String?
+  description        String
+  quantity           Decimal?          @db.Decimal(12, 2)
+  unit               String?
+  brand              String?
+  model              String?
+  unitPrice          Decimal?          @db.Decimal(12, 2)
+  totalPrice         Decimal?          @db.Decimal(12, 2)
+  tax                Decimal?          @db.Decimal(12, 2)
+  leadTime           String?
+  warranty           String?
+  availability       String?
+  observations       String?           @db.Text
+  matchScore         Int?
+  differences        String?           @db.Text
+  rawText            String?           @db.Text
+  createdAt          DateTime          @default(now())
+
+  supplierQuote      SupplierQuote     @relation(fields: [supplierQuoteId], references: [id], onDelete: Cascade)
+  quoteRequestItem   QuoteRequestItem? @relation(fields: [quoteRequestItemId], references: [id], onDelete: SetNull)
+
+  @@index([supplierQuoteId])
+  @@index([quoteRequestItemId])
 }
 
 model PurchaseOrderLine {

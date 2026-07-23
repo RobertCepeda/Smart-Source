@@ -5,10 +5,18 @@ import { validate } from "../../middlewares/validate";
 import { authenticate } from "../auth/auth.middleware";
 import {
   createQuoteRequestSchema,
+  createSupplierQuoteSchema,
   listQuoteRequestsQuerySchema,
   quoteRequestIdParamsSchema,
+  quoteRequestSupplierParamsSchema,
 } from "./quoteRequest.schema";
-import { createQuoteRequest, getQuoteRequest, listQuoteRequests } from "./quoteRequest.service";
+import {
+  createQuoteRequest,
+  generateSupplierEmail,
+  getQuoteRequest,
+  listQuoteRequests,
+  registerSupplierQuote,
+} from "./quoteRequest.service";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -97,3 +105,46 @@ quoteRequestRouter.get("/:id", validate({ params: quoteRequestIdParamsSchema }),
     next(error);
   }
 });
+
+quoteRequestRouter.post(
+  "/:id/suppliers/:supplierId/email",
+  validate({ params: quoteRequestSupplierParamsSchema }),
+  async (req, res, next) => {
+    try {
+      const { id, supplierId } = quoteRequestSupplierParamsSchema.parse(req.params);
+      const email = await generateSupplierEmail(organizationId(req), id, supplierId);
+      res.status(201).json(email);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+quoteRequestRouter.post(
+  "/:id/quotes",
+  validate({ params: quoteRequestIdParamsSchema }),
+  upload.single("file"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ message: "Selecciona el archivo de cotización recibido." });
+        return;
+      }
+
+      const { id } = quoteRequestIdParamsSchema.parse(req.params);
+      const parsed = createSupplierQuoteSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          message: "Revisa los campos marcados e intenta de nuevo.",
+          errors: parsed.error.flatten(),
+        });
+        return;
+      }
+
+      const quote = await registerSupplierQuote(organizationId(req), id, parsed.data, req.file);
+      res.status(201).json({ quote });
+    } catch (error) {
+      next(error);
+    }
+  },
+);

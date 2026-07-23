@@ -344,6 +344,98 @@ export type QuoteRequestAttachment = {
   createdAt: string;
 };
 
+export type QuoteRequestSupplier = {
+  id: string;
+  supplierId: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  createdAt: string;
+  supplier: Pick<Supplier, "id" | "name" | "rnc" | "category" | "city" | "phone" | "email" | "rating"> & {
+    contacts?: SupplierContact[];
+  };
+};
+
+export type QuoteRequestEmailLog = {
+  id: string;
+  supplierId: string | null;
+  recipientName: string | null;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  status: "GENERADO" | "ENVIADO" | "FALLIDO";
+  createdAt: string;
+};
+
+export type SupplierQuoteLine = {
+  id: string;
+  quoteRequestItemId: string | null;
+  description: string;
+  quantity: string | null;
+  unit: string | null;
+  brand: string | null;
+  model: string | null;
+  unitPrice: string | null;
+  totalPrice: string | null;
+  tax: string | null;
+  leadTime: string | null;
+  warranty: string | null;
+  availability: string | null;
+  observations: string | null;
+  matchScore: number | null;
+  differences: string | null;
+  rawText: string | null;
+};
+
+export type SupplierQuote = {
+  id: string;
+  quoteRequestId: string;
+  supplierId: string;
+  supplier: Pick<Supplier, "id" | "name" | "rnc" | "category" | "city" | "phone" | "email" | "rating">;
+  receivedAt: string;
+  fileName: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  observations: string | null;
+  reviewStatus: "RECIBIDA" | "ANALIZADA" | "EN_REVISION" | "APROBADA" | "DESCARTADA";
+  analysis?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  lines: SupplierQuoteLine[];
+};
+
+export type QuoteComparison = {
+  suppliers: Array<{
+    supplierId: string;
+    supplierName: string;
+    rating: number;
+    quoteId: string | null;
+    quoteStatus: SupplierQuote["reviewStatus"] | null;
+  }>;
+  rows: Array<{
+    item: QuoteRequestItem;
+    offers: Array<{
+      supplierId: string;
+      supplierName: string;
+      quoteId: string | null;
+      lineId: string | null;
+      unitPrice: number | null;
+      totalPrice: number | null;
+      brand: string | null;
+      model: string | null;
+      leadTime: string | null;
+      leadDays: number | null;
+      warranty: string | null;
+      availability: string | null;
+      observations: string | null;
+      differences: string | null;
+      matchScore: number | null;
+      isBestPrice: boolean;
+      isBestDelivery: boolean;
+    }>;
+  }>;
+};
+
 export type QuoteRequest = {
   id: string;
   number: string;
@@ -358,8 +450,14 @@ export type QuoteRequest = {
   requester: Pick<AuthUser, "id" | "name" | "email"> | null;
   items: QuoteRequestItem[];
   attachments: QuoteRequestAttachment[];
+  suppliers: QuoteRequestSupplier[];
+  emailLogs: QuoteRequestEmailLog[];
+  quotes: SupplierQuote[];
+  comparison: QuoteComparison;
   itemCount: number;
   attachmentCount: number;
+  supplierCount: number;
+  quoteCount: number;
 };
 
 export type QuoteRequestPayload = {
@@ -368,6 +466,7 @@ export type QuoteRequestPayload = {
   requesterName?: string;
   deadline?: string;
   observations?: string;
+  supplierIds?: string[];
   items: Array<{
     description: string;
     quantity: number;
@@ -878,6 +977,55 @@ export async function getQuoteRequestRequest(token: string, id: string) {
   return apiRequest<{ request: QuoteRequest }>(`/quote-requests/${id}`, {
     headers: authHeaders(token),
   });
+}
+
+export async function generateQuoteRequestEmailRequest(token: string, requestId: string, supplierId: string) {
+  if (isDemoMode) {
+    return demoApi.generateQuoteRequestEmail(requestId, supplierId);
+  }
+
+  return apiRequest<{ emailLog: QuoteRequestEmailLog; mailtoUrl: string }>(
+    `/quote-requests/${requestId}/suppliers/${supplierId}/email`,
+    {
+      method: "POST",
+      headers: authHeaders(token),
+    },
+  );
+}
+
+export async function registerSupplierQuoteRequest(
+  token: string,
+  requestId: string,
+  payload: { supplierId: string; receivedAt?: string; observations?: string },
+  file: File,
+) {
+  if (isDemoMode) {
+    return demoApi.registerSupplierQuote(requestId, payload, file);
+  }
+
+  const formData = new FormData();
+  formData.set("supplierId", payload.supplierId);
+  if (payload.receivedAt) {
+    formData.set("receivedAt", payload.receivedAt);
+  }
+  if (payload.observations) {
+    formData.set("observations", payload.observations);
+  }
+  formData.set("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/quote-requests/${requestId}/quotes`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: formData,
+  });
+
+  const data = (await response.json().catch(() => ({}))) as { message?: string };
+
+  if (!response.ok) {
+    throw new Error(data.message ?? "No pudimos registrar la cotización.");
+  }
+
+  return data as { quote: SupplierQuote };
 }
 
 export async function getPriceHistoryRequest(

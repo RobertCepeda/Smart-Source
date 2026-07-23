@@ -19,14 +19,19 @@ import type {
   PurchaseOrder,
   PurchaseOrderFilters,
   PurchaseOrderPayload,
+  QuoteComparison,
   QuoteRequest,
+  QuoteRequestEmailLog,
   QuoteRequestFilters,
   QuoteRequestPayload,
+  QuoteRequestSupplier,
   ReportsSummaryResponse,
   SmartSearchResponse,
   Supplier,
   SupplierFilters,
   SupplierPayload,
+  SupplierQuote,
+  SupplierQuoteLine,
   SupportTicket,
 } from "./api";
 
@@ -287,10 +292,10 @@ let quoteRequests: QuoteRequest[] = [
   makeQuoteRequest("qr_1", "SC-2026-00001", "Torre Norte - Eléctrico", "CC-204", [
     { description: "Cable eléctrico THHN 12 rojo", quantity: 120, unit: "metro", technicalSpecs: "Certificación UL, cobre, color rojo." },
     { description: "Breaker 2 polos 40A", quantity: 6, unit: "unidad", technicalSpecs: "Compatible con panel existente." },
-  ]),
+  ], [], demoUser.name, "2026-07-30", "Favor cotizar con tiempo de entrega y garantía.", ["sup_electro", "sup_ferreteria"]),
   makeQuoteRequest("qr_2", "SC-2026-00002", "Oficina principal", "ADM-010", [
     { description: "Material gastable mensual", quantity: 3, unit: "caja", technicalSpecs: "Papel, folders, lapiceros y etiquetas." },
-  ]),
+  ], [], demoUser.name, "2026-07-28", "Compra recurrente para administración.", ["sup_ofimax"]),
 ];
 
 let supportTickets: SupportTicket[] = [
@@ -523,11 +528,70 @@ export const demoApi = {
       payload.requesterName,
       payload.deadline,
       payload.observations,
+      payload.supplierIds ?? [],
     );
     quoteRequests = [request, ...quoteRequests];
     return ok({ request });
   },
   getQuoteRequest: (id: string) => ok({ request: quoteRequests.find((request) => request.id === id) ?? quoteRequests[0] }),
+  generateQuoteRequestEmail: (requestId: string, supplierId: string) => {
+    const request = quoteRequests.find((entry) => entry.id === requestId) ?? quoteRequests[0];
+    const selectedSupplier = request.suppliers.find((entry) => entry.supplierId === supplierId) ?? request.suppliers[0];
+    const recipientEmail = selectedSupplier?.contactEmail ?? selectedSupplier?.supplier.email ?? "suplidor@demo.local";
+    const recipientName = selectedSupplier?.contactName ?? selectedSupplier?.supplier.name ?? "Suplidor";
+    const subject = `${request.number} - Solicitud de cotización`;
+    const body = buildQuoteEmailBody(request, recipientName);
+    const emailLog: QuoteRequestEmailLog = {
+      id: `qr_email_${Date.now()}`,
+      supplierId,
+      recipientName,
+      recipientEmail,
+      subject,
+      body,
+      status: "GENERADO",
+      createdAt: new Date().toISOString(),
+    };
+
+    request.emailLogs = [emailLog, ...request.emailLogs];
+    request.status = request.status === "BORRADOR" ? "LISTA_PARA_ENVIAR" : request.status;
+    refreshQuoteRequest(request);
+
+    return ok({
+      emailLog,
+      mailtoUrl: `mailto:${encodeURIComponent(recipientEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+    });
+  },
+  registerSupplierQuote: (
+    requestId: string,
+    payload: { supplierId: string; receivedAt?: string; observations?: string },
+    file: File,
+  ) => {
+    const request = quoteRequests.find((entry) => entry.id === requestId) ?? quoteRequests[0];
+    const supplier = findSupplier(payload.supplierId);
+    const receivedAt = payload.receivedAt ? `${payload.receivedAt}T12:00:00.000Z` : new Date().toISOString();
+    const quote: SupplierQuote = {
+      id: `sq_${Date.now()}`,
+      quoteRequestId: request.id,
+      supplierId: supplier.id,
+      supplier: pickComparisonSupplier(supplier),
+      receivedAt,
+      fileName: file.name,
+      mimeType: file.type || null,
+      sizeBytes: file.size,
+      observations: payload.observations || null,
+      reviewStatus: "ANALIZADA",
+      analysis: { mode: "static-demo", message: "Datos simulados para vista previa estática." },
+      createdAt: receivedAt,
+      updatedAt: receivedAt,
+      lines: request.items.map((item, index) => makeDemoQuoteLine(request.id, supplier, item, index)),
+    };
+
+    request.quotes = [quote, ...request.quotes.filter((entry) => entry.supplierId !== supplier.id)];
+    request.status = "RECIBIENDO_COTIZACIONES";
+    refreshQuoteRequest(request);
+
+    return ok({ quote });
+  },
   getPriceHistory: (filters: { itemId?: string; supplierId?: string } = {}) => ok(makePriceHistory(filters)),
   getReportsSummary: () => ok(makeReportsSummary()),
   listAiDocuments: () => ok({ documents: aiDocuments.map(toAiSummary) }),
@@ -735,8 +799,9 @@ function makeQuoteRequest(
   requesterName = demoUser.name,
   deadline?: string,
   observations?: string,
+  supplierIds: string[] = [],
 ): QuoteRequest {
-  return {
+  const request: QuoteRequest = {
     id,
     number,
     status: "BORRADOR",
@@ -763,9 +828,223 @@ function makeQuoteRequest(
       sizeBytes: file.size,
       createdAt: now,
     })),
+    suppliers: supplierIds.map((supplierId, index) => makeQuoteRequestSupplier(id, supplierId, index)),
+    emailLogs: [],
+    quotes: [],
+    comparison: { suppliers: [], rows: [] },
     itemCount: lines.length,
     attachmentCount: files.length,
+    supplierCount: supplierIds.length,
+    quoteCount: 0,
   };
+
+  return refreshQuoteRequest(request);
+}
+
+function makeQuoteRequestSupplier(requestId: string, supplierId: string, index: number): QuoteRequestSupplier {
+  const supplier = findSupplier(supplierId);
+  const primary = supplier.contacts.find((contact) => contact.isPrimary) ?? supplier.contacts[0];
+
+  return {
+    id: `${requestId}_supplier_${index}`,
+    supplierId: supplier.id,
+    contactName: primary?.name ?? null,
+    contactEmail: primary?.email ?? supplier.email,
+    contactPhone: primary?.phone ?? supplier.phone,
+    createdAt: now,
+    supplier: {
+      ...pickComparisonSupplier(supplier),
+      contacts: supplier.contacts,
+    },
+  };
+}
+
+function makeDemoQuoteLine(
+  requestId: string,
+  supplier: Supplier,
+  item: QuoteRequest["items"][number],
+  index: number,
+): SupplierQuoteLine {
+  const itemQuantity = numberOrNull(item.quantity) ?? 1;
+  const catalogPrice = supplier.catalogItems.find((catalogItem) => namesLookRelated(catalogItem.name, item.description));
+  const fallbackBase = supplier.rating ? 320 + index * 160 + (6 - supplier.rating) * 55 : 520 + index * 160;
+  const unitPrice = numberOrNull(catalogPrice?.lastPrice) ?? fallbackBase;
+  const leadDays = catalogPrice?.leadTimeDays ?? Math.max(1, 2 + index + (5 - (supplier.rating ?? 3)));
+
+  return {
+    id: `${requestId}_${supplier.id}_line_${index}`,
+    quoteRequestItemId: item.id,
+    description: item.description,
+    quantity: item.quantity,
+    unit: item.unit,
+    brand: supplier.catalogItems[index]?.name ? "Referencial" : null,
+    model: null,
+    unitPrice: unitPrice.toFixed(2),
+    totalPrice: (unitPrice * itemQuantity).toFixed(2),
+    tax: (unitPrice * itemQuantity * 0.18).toFixed(2),
+    leadTime: `${leadDays} días`,
+    warranty: "30 días",
+    availability: "Disponible",
+    observations: "Línea detectada desde la cotización demo.",
+    matchScore: catalogPrice ? 94 : 78,
+    differences: catalogPrice ? null : "Revisar descripción ofrecida contra la especificación solicitada.",
+    rawText: item.description,
+  };
+}
+
+function refreshQuoteRequest(request: QuoteRequest) {
+  request.itemCount = request.items.length;
+  request.attachmentCount = request.attachments.length;
+  request.supplierCount = request.suppliers.length;
+  request.quoteCount = request.quotes.length;
+  request.updatedAt = new Date().toISOString();
+  request.comparison = buildQuoteComparison(request);
+  return request;
+}
+
+function buildQuoteComparison(request: QuoteRequest): QuoteComparison {
+  const suppliersForComparison = request.suppliers.map((entry) => {
+    const latestQuote = request.quotes.find((quote) => quote.supplierId === entry.supplierId) ?? null;
+
+    return {
+      supplierId: entry.supplierId,
+      supplierName: entry.supplier.name,
+      rating: entry.supplier.rating ?? 0,
+      quoteId: latestQuote?.id ?? null,
+      quoteStatus: latestQuote?.reviewStatus ?? null,
+    };
+  });
+
+  const rows = request.items.map((item) => {
+    const offers = suppliersForComparison.map((supplierEntry) => {
+      const quote = request.quotes.find((entry) => entry.supplierId === supplierEntry.supplierId) ?? null;
+      const line = quote?.lines.find((entry) => entry.quoteRequestItemId === item.id) ?? null;
+
+      return {
+        supplierId: supplierEntry.supplierId,
+        supplierName: supplierEntry.supplierName,
+        quoteId: quote?.id ?? null,
+        lineId: line?.id ?? null,
+        unitPrice: numberOrNull(line?.unitPrice),
+        totalPrice: numberOrNull(line?.totalPrice),
+        brand: line?.brand ?? null,
+        model: line?.model ?? null,
+        leadTime: line?.leadTime ?? null,
+        leadDays: parseLeadDays(line?.leadTime),
+        warranty: line?.warranty ?? null,
+        availability: line?.availability ?? null,
+        observations: line?.observations ?? null,
+        differences: line?.differences ?? null,
+        matchScore: line?.matchScore ?? null,
+        isBestPrice: false,
+        isBestDelivery: false,
+      };
+    });
+
+    const validPrices = offers.map((offer) => offer.totalPrice).filter((value): value is number => typeof value === "number");
+    const validLeads = offers.map((offer) => offer.leadDays).filter((value): value is number => typeof value === "number");
+    const bestPrice = validPrices.length ? Math.min(...validPrices) : null;
+    const bestDelivery = validLeads.length ? Math.min(...validLeads) : null;
+
+    return {
+      item,
+      offers: offers.map((offer) => ({
+        ...offer,
+        isBestPrice: bestPrice !== null && offer.totalPrice === bestPrice,
+        isBestDelivery: bestDelivery !== null && offer.leadDays === bestDelivery,
+      })),
+    };
+  });
+
+  return { suppliers: suppliersForComparison, rows };
+}
+
+function buildQuoteEmailBody(request: QuoteRequest, recipientName: string) {
+  const itemLines = request.items
+    .map(
+      (item) =>
+        `${item.lineNumber}. ${item.description} - ${Number(item.quantity).toLocaleString("es-DO")} ${item.unit}${
+          item.technicalSpecs ? ` (${item.technicalSpecs})` : ""
+        }`,
+    )
+    .join("\n");
+
+  return [
+    `Hola ${recipientName},`,
+    "",
+    `Por este medio solicitamos cotización para la solicitud ${request.number}.`,
+    `Proyecto/Centro: ${request.project}`,
+    request.costCenter ? `Centro de costo: ${request.costCenter}` : "",
+    request.deadline ? `Fecha límite de respuesta: ${new Date(request.deadline).toLocaleDateString("es-DO")}` : "",
+    "",
+    "Detalle requerido:",
+    itemLines,
+    "",
+    request.observations ? `Observaciones: ${request.observations}` : "",
+    "",
+    "Favor incluir precio unitario, precio total, impuestos, marca, modelo, disponibilidad, garantía y tiempo de entrega.",
+    "",
+    "Saludos,",
+    "Smart Source",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function pickComparisonSupplier(supplier: Supplier) {
+  return {
+    id: supplier.id,
+    name: supplier.name,
+    rnc: supplier.rnc,
+    category: supplier.category,
+    city: supplier.city,
+    phone: supplier.phone,
+    email: supplier.email,
+    rating: supplier.rating,
+  };
+}
+
+function namesLookRelated(left: string, right: string) {
+  const leftTokens = tokenizeText(left);
+  const rightTokens = tokenizeText(right);
+
+  if (!leftTokens.length || !rightTokens.length) {
+    return false;
+  }
+
+  return leftTokens.some((token) => rightTokens.includes(token));
+}
+
+function tokenizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 2);
+}
+
+function numberOrNull(value: string | number | null | undefined) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseLeadDays(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.match(/\d+/);
+  return match ? Number(match[0]) : null;
 }
 
 function point(id: string, itemId: string, itemName: string, supplierId: string, supplierName: string, price: number, source: string): PricePoint {
@@ -810,6 +1089,7 @@ function quoteRequestMatches(request: QuoteRequest, filters: QuoteRequestFilters
       request.number.toLowerCase().includes(search) ||
       request.project.toLowerCase().includes(search) ||
       request.costCenter?.toLowerCase().includes(search) ||
+      request.suppliers.some((entry) => entry.supplier.name.toLowerCase().includes(search)) ||
       request.items.some((item) => item.description.toLowerCase().includes(search)))
   );
 }

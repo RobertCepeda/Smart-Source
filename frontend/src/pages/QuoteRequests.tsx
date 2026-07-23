@@ -1,16 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   CalendarDays,
+  CheckCircle2,
   ClipboardList,
   Eye,
   FileText,
+  FileUp,
   Inbox,
+  Mail,
   Paperclip,
   Plus,
   Printer,
   Search,
+  Sparkles,
+  Star,
+  Table2,
   Trash2,
+  type LucideIcon,
+  Users,
   X,
 } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
@@ -21,11 +30,15 @@ import { Input } from "../components/ui/input";
 import { useAuth } from "../contexts/AuthContext";
 import {
   createQuoteRequestRequest,
+  generateQuoteRequestEmailRequest,
   getQuoteRequestRequest,
   listQuoteRequestsRequest,
+  listSuppliersRequest,
+  registerSupplierQuoteRequest,
   type QuoteRequest,
   type QuoteRequestPayload,
   type QuoteRequestStatus,
+  type Supplier,
 } from "../services/api";
 
 type ViewMode = "create" | "list" | "detail";
@@ -75,8 +88,13 @@ export function QuoteRequests() {
   const [observations, setObservations] = useState("");
   const [lines, setLines] = useState<RequestLineForm[]>([{ ...emptyLine }]);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<QuoteRequestStatus | "">("");
   const [search, setSearch] = useState("");
+  const [quoteSupplierId, setQuoteSupplierId] = useState("");
+  const [quoteFile, setQuoteFile] = useState<File | null>(null);
+  const [quoteReceivedAt, setQuoteReceivedAt] = useState("");
+  const [quoteObservations, setQuoteObservations] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -85,6 +103,12 @@ export function QuoteRequests() {
       setRequesterPrefilled(true);
     }
   }, [requesterPrefilled, user?.name]);
+
+  const suppliersQuery = useQuery({
+    queryKey: ["suppliers", "quote-requests"],
+    queryFn: () => listSuppliersRequest(token!),
+    enabled: Boolean(token),
+  });
 
   const requestsQuery = useQuery({
     queryKey: ["quote-requests", statusFilter, search],
@@ -97,6 +121,7 @@ export function QuoteRequests() {
   });
 
   const requests = useMemo(() => requestsQuery.data?.requests ?? [], [requestsQuery.data?.requests]);
+  const suppliers = useMemo(() => suppliersQuery.data?.suppliers ?? [], [suppliersQuery.data?.suppliers]);
   const selectedRequestFromList = requests.find((request) => request.id === selectedRequestId) ?? null;
 
   const requestDetailQuery = useQuery({
@@ -107,12 +132,18 @@ export function QuoteRequests() {
 
   const selectedRequest = requestDetailQuery.data?.request ?? selectedRequestFromList;
 
+  useEffect(() => {
+    if (!quoteSupplierId && selectedRequest?.suppliers.length) {
+      setQuoteSupplierId(selectedRequest.suppliers[0].supplierId);
+    }
+  }, [quoteSupplierId, selectedRequest?.suppliers]);
+
   const stats = useMemo(
     () => ({
       total: requests.length,
-      drafts: requests.filter((request) => request.status === "BORRADOR").length,
+      suppliers: requests.reduce((sum, request) => sum + request.supplierCount, 0),
+      quotes: requests.reduce((sum, request) => sum + request.quoteCount, 0),
       items: requests.reduce((sum, request) => sum + request.itemCount, 0),
-      attachments: requests.reduce((sum, request) => sum + request.attachmentCount, 0),
     }),
     [requests],
   );
@@ -128,7 +159,9 @@ export function QuoteRequests() {
       setObservations("");
       setLines([{ ...emptyLine }]);
       setAttachments([]);
+      setSelectedSupplierIds([]);
       setSelectedRequestId(request.id);
+      setQuoteSupplierId(request.suppliers[0]?.supplierId ?? "");
       setViewMode("detail");
       queryClient.setQueryData(["quote-request", request.id], { request });
       await queryClient.invalidateQueries({ queryKey: ["quote-requests"] });
@@ -137,8 +170,39 @@ export function QuoteRequests() {
       setNotice(error instanceof Error ? error.message : "No pudimos crear la solicitud de cotización."),
   });
 
+  const emailMutation = useMutation({
+    mutationFn: ({ requestId, supplierId }: { requestId: string; supplierId: string }) =>
+      generateQuoteRequestEmailRequest(token!, requestId, supplierId),
+    onSuccess: async ({ mailtoUrl, emailLog }) => {
+      window.location.href = mailtoUrl;
+      setNotice(`Correo preparado para ${emailLog.recipientEmail}.`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["quote-requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["quote-request", selectedRequestId] }),
+      ]);
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos preparar el correo."),
+  });
+
+  const quoteMutation = useMutation({
+    mutationFn: ({ requestId, supplierId, file, receivedAt, observations }: { requestId: string; supplierId: string; file: File; receivedAt?: string; observations?: string }) =>
+      registerSupplierQuoteRequest(token!, requestId, { supplierId, receivedAt, observations }, file),
+    onSuccess: async () => {
+      setNotice("Cotización registrada y analizada.");
+      setQuoteFile(null);
+      setQuoteObservations("");
+      setQuoteReceivedAt("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["quote-requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["quote-request", selectedRequestId] }),
+      ]);
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos registrar la cotización."),
+  });
+
   function openRequest(request: QuoteRequest) {
     setSelectedRequestId(request.id);
+    setQuoteSupplierId(request.suppliers[0]?.supplierId ?? "");
     setViewMode("detail");
     setNotice(null);
   }
@@ -162,6 +226,10 @@ export function QuoteRequests() {
     }
 
     setAttachments((current) => [...current, ...Array.from(fileList)].slice(0, 8));
+  }
+
+  function toggleSupplier(id: string) {
+    setSelectedSupplierIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
   }
 
   function submitRequest(event: React.FormEvent<HTMLFormElement>) {
@@ -194,9 +262,28 @@ export function QuoteRequests() {
         requesterName,
         deadline,
         observations,
+        supplierIds: selectedSupplierIds,
         items: validLines,
       },
       files: attachments,
+    });
+  }
+
+  function submitQuote(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNotice(null);
+
+    if (!selectedRequest || !quoteSupplierId || !quoteFile) {
+      setNotice("Selecciona el suplidor y el archivo de cotización.");
+      return;
+    }
+
+    quoteMutation.mutate({
+      requestId: selectedRequest.id,
+      supplierId: quoteSupplierId,
+      file: quoteFile,
+      receivedAt: quoteReceivedAt,
+      observations: quoteObservations,
     });
   }
 
@@ -205,20 +292,20 @@ export function QuoteRequests() {
       <PageHeader
         eyebrow="Compras y análisis"
         title="Solicitudes de Cotización"
-        description="Crea, consulta e imprime solicitudes con número automático, ítems requeridos y adjuntos."
+        description="Centraliza solicitud, suplidores, correos, recepción, análisis y comparación de ofertas."
         actions={
           <Badge tone="green">
-            <ClipboardList className="h-3.5 w-3.5" />
-            Paso 1 listo
+            <Sparkles className="h-3.5 w-3.5" />
+            Flujo completo
           </Badge>
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Solicitudes" value={stats.total.toString()} />
-        <MetricCard label="Borradores" value={stats.drafts.toString()} />
-        <MetricCard label="Ítems solicitados" value={stats.items.toString()} />
-        <MetricCard label="Adjuntos" value={stats.attachments.toString()} />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={ClipboardList} label="Solicitudes" value={stats.total.toString()} />
+        <MetricCard icon={Users} label="Suplidores invitados" value={stats.suppliers.toString()} />
+        <MetricCard icon={FileText} label="Cotizaciones" value={stats.quotes.toString()} />
+        <MetricCard icon={Table2} label="Ítems solicitados" value={stats.items.toString()} />
       </section>
 
       <section className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-white p-2 shadow-soft">
@@ -228,18 +315,20 @@ export function QuoteRequests() {
         </Button>
         <Button type="button" variant={viewMode === "list" ? "default" : "ghost"} onClick={() => setViewMode("list")}>
           <Inbox className="h-4 w-4" />
-          Bandeja de solicitudes
+          Bandeja
         </Button>
         {selectedRequest ? (
           <Button type="button" variant={viewMode === "detail" ? "default" : "ghost"} onClick={() => setViewMode("detail")}>
             <Eye className="h-4 w-4" />
-            Detalle {selectedRequest.number}
+            {selectedRequest.number}
           </Button>
         ) : null}
       </section>
 
       {viewMode === "create" ? (
         <CreateQuoteRequestPanel
+          suppliers={suppliers}
+          selectedSupplierIds={selectedSupplierIds}
           project={project}
           costCenter={costCenter}
           requesterName={requesterName}
@@ -249,6 +338,7 @@ export function QuoteRequests() {
           attachments={attachments}
           notice={notice}
           isPending={createMutation.isPending}
+          isLoadingSuppliers={suppliersQuery.isLoading}
           onProjectChange={setProject}
           onCostCenterChange={setCostCenter}
           onRequesterNameChange={setRequesterName}
@@ -259,6 +349,7 @@ export function QuoteRequests() {
           onRemoveLine={removeLine}
           onAddAttachments={addAttachments}
           onRemoveAttachment={(index) => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))}
+          onToggleSupplier={toggleSupplier}
           onSubmit={submitRequest}
         />
       ) : null}
@@ -278,10 +369,22 @@ export function QuoteRequests() {
       {viewMode === "detail" ? (
         <QuoteRequestDetailPanel
           request={selectedRequest}
+          quoteSupplierId={quoteSupplierId}
+          quoteFile={quoteFile}
+          quoteReceivedAt={quoteReceivedAt}
+          quoteObservations={quoteObservations}
           isLoading={requestDetailQuery.isLoading}
           notice={notice}
+          isEmailPending={emailMutation.isPending}
+          isQuotePending={quoteMutation.isPending}
           onBack={() => setViewMode("list")}
           onPrint={() => selectedRequest && printQuoteRequest(selectedRequest)}
+          onGenerateEmail={(supplierId) => selectedRequest && emailMutation.mutate({ requestId: selectedRequest.id, supplierId })}
+          onQuoteSupplierChange={setQuoteSupplierId}
+          onQuoteFileChange={setQuoteFile}
+          onQuoteReceivedAtChange={setQuoteReceivedAt}
+          onQuoteObservationsChange={setQuoteObservations}
+          onSubmitQuote={submitQuote}
         />
       ) : null}
     </div>
@@ -289,6 +392,8 @@ export function QuoteRequests() {
 }
 
 function CreateQuoteRequestPanel({
+  suppliers,
+  selectedSupplierIds,
   project,
   costCenter,
   requesterName,
@@ -298,6 +403,7 @@ function CreateQuoteRequestPanel({
   attachments,
   notice,
   isPending,
+  isLoadingSuppliers,
   onProjectChange,
   onCostCenterChange,
   onRequesterNameChange,
@@ -308,8 +414,11 @@ function CreateQuoteRequestPanel({
   onRemoveLine,
   onAddAttachments,
   onRemoveAttachment,
+  onToggleSupplier,
   onSubmit,
 }: {
+  suppliers: Supplier[];
+  selectedSupplierIds: string[];
   project: string;
   costCenter: string;
   requesterName: string;
@@ -319,6 +428,7 @@ function CreateQuoteRequestPanel({
   attachments: File[];
   notice: string | null;
   isPending: boolean;
+  isLoadingSuppliers: boolean;
   onProjectChange: (value: string) => void;
   onCostCenterChange: (value: string) => void;
   onRequesterNameChange: (value: string) => void;
@@ -329,18 +439,16 @@ function CreateQuoteRequestPanel({
   onRemoveLine: (index: number) => void;
   onAddAttachments: (files: FileList | null) => void;
   onRemoveAttachment: (index: number) => void;
+  onToggleSupplier: (id: string) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-col gap-1">
-          <h2 className="text-base font-bold text-ink">Nueva solicitud</h2>
-          <p className="text-xs text-slate-500">Completa los datos base. Al guardar se abrirá el detalle completo.</p>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <Card>
+        <CardHeader>
+          <h2 className="text-base font-bold text-ink">Datos de la solicitud</h2>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Proyecto o centro</span>
@@ -352,32 +460,13 @@ function CreateQuoteRequestPanel({
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Solicitante</span>
-              <Input
-                value={requesterName}
-                onChange={(event) => onRequesterNameChange(event.target.value)}
-                placeholder="Nombre del solicitante"
-              />
+              <Input value={requesterName} onChange={(event) => onRequesterNameChange(event.target.value)} placeholder="Nombre del solicitante" />
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Fecha límite</span>
               <Input type="date" value={deadline} onChange={(event) => onDeadlineChange(event.target.value)} />
             </label>
           </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[13px] font-semibold text-slate-700">Materiales, equipos o servicios</p>
-              <Button type="button" variant="outline" size="sm" onClick={onAddLine}>
-                <Plus className="h-4 w-4" />
-                Agregar
-              </Button>
-            </div>
-
-            {lines.map((line, index) => (
-              <RequestLineEditor key={index} index={index} line={line} onUpdate={onUpdateLine} onRemove={onRemoveLine} />
-            ))}
-          </div>
-
           <label className="block">
             <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Observaciones generales</span>
             <textarea
@@ -387,13 +476,55 @@ function CreateQuoteRequestPanel({
               placeholder="Condiciones, instrucciones, equivalencias permitidas o notas para los suplidores."
             />
           </label>
+        </CardContent>
+      </Card>
 
+      <Card>
+        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-base font-bold text-ink">Suplidores invitados</h2>
+            <p className="text-xs text-slate-500">Selecciona uno o varios suplidores registrados. Se usará su correo o contacto principal.</p>
+          </div>
+          <Badge tone={selectedSupplierIds.length ? "green" : "slate"}>{selectedSupplierIds.length} seleccionados</Badge>
+        </CardHeader>
+        <CardContent>
+          {isLoadingSuppliers ? <p className="text-[13px] text-slate-600">Cargando suplidores...</p> : null}
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {suppliers.map((supplier) => (
+              <SupplierChoiceCard
+                key={supplier.id}
+                supplier={supplier}
+                isSelected={selectedSupplierIds.includes(supplier.id)}
+                onToggle={() => onToggleSupplier(supplier.id)}
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <h2 className="text-base font-bold text-ink">Materiales, equipos o servicios</h2>
+          <Button type="button" variant="outline" size="sm" onClick={onAddLine}>
+            <Plus className="h-4 w-4" />
+            Agregar
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {lines.map((line, index) => (
+            <RequestLineEditor key={index} index={index} line={line} onUpdate={onUpdateLine} onRemove={onRemoveLine} />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h2 className="text-base font-bold text-ink">Adjuntos de referencia</h2>
+        </CardHeader>
+        <CardContent>
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[13px] font-bold text-ink">Documentos o planos adjuntos</p>
-                <p className="text-xs text-slate-500">PDF, Excel, Word o imágenes. Máximo 8 archivos por ahora.</p>
-              </div>
+              <p className="text-xs text-slate-500">Planos, fichas técnicas o documentos para enviar a los suplidores.</p>
               <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-xs font-bold text-ink shadow-sm transition hover:bg-slate-100">
                 <Paperclip className="h-4 w-4" />
                 Adjuntar
@@ -412,37 +543,51 @@ function CreateQuoteRequestPanel({
             {attachments.length ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {attachments.map((file, index) => (
-                  <div
-                    key={`${file.name}-${index}`}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-white px-2.5 py-2 text-xs"
-                  >
-                    <FileText className="h-4 w-4 text-brand-700" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-bold text-ink">{file.name}</p>
-                      <p className="text-slate-500">{formatBytes(file.size)}</p>
-                    </div>
-                    <Button type="button" variant="ghost" size="icon" title="Quitar adjunto" onClick={() => onRemoveAttachment(index)}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  <FileChip key={`${file.name}-${index}`} name={file.name} detail={formatBytes(file.size)} onRemove={() => onRemoveAttachment(index)} />
                 ))}
               </div>
             ) : null}
           </div>
 
-          {notice ? (
-            <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-[13px] text-brand-700">
-              {notice}
-            </div>
-          ) : null}
+          {notice ? <Notice>{notice}</Notice> : null}
+          <div className="mt-4">
+            <Button type="submit" disabled={isPending}>
+              <ClipboardList className="h-4 w-4" />
+              {isPending ? "Creando..." : "Crear solicitud"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </form>
+  );
+}
 
-          <Button type="submit" disabled={isPending}>
-            <ClipboardList className="h-4 w-4" />
-            {isPending ? "Creando..." : "Crear solicitud"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+function SupplierChoiceCard({ supplier, isSelected, onToggle }: { supplier: Supplier; isSelected: boolean; onToggle: () => void }) {
+  const primary = supplier.contacts.find((contact) => contact.isPrimary) ?? supplier.contacts[0];
+  const email = primary?.email ?? supplier.email;
+  const phone = primary?.phone ?? supplier.phone;
+
+  return (
+    <button
+      type="button"
+      className={`rounded-lg border p-3 text-left transition ${
+        isSelected ? "border-brand-300 bg-brand-50/70" : "border-border bg-white hover:border-brand-200 hover:bg-slate-50"
+      }`}
+      onClick={onToggle}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-ink">{supplier.name}</p>
+          <p className="mt-1 truncate text-xs text-slate-500">{supplier.city ?? "Sin ciudad"} · {supplier.category ?? "Sin categoría"}</p>
+        </div>
+        {isSelected ? <CheckCircle2 className="h-4 w-4 text-brand-700" /> : <span className="h-4 w-4 rounded-full border border-slate-300" />}
+      </div>
+      <div className="mt-3 space-y-1 text-xs text-slate-600">
+        <p className="truncate">Contacto: {primary?.name ?? "Principal"}</p>
+        <p className="truncate">Correo: {email ?? "Sin correo"}</p>
+        <p className="truncate">Teléfono: {phone ?? "Sin teléfono"}</p>
+      </div>
+    </button>
   );
 }
 
@@ -469,7 +614,7 @@ function QuoteRequestsInbox({
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-base font-bold text-ink">Bandeja de solicitudes</h2>
-            <p className="text-xs text-slate-500">Consulta las solicitudes creadas y abre el detalle cuando lo necesites.</p>
+            <p className="text-xs text-slate-500">Abre el expediente para enviar correos, registrar cotizaciones y comparar ofertas.</p>
           </div>
           <select
             className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]"
@@ -487,22 +632,12 @@ function QuoteRequestsInbox({
         </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input className="pl-9" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Buscar por número, proyecto o ítem" />
+          <Input className="pl-9" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Buscar por número, proyecto, suplidor o ítem" />
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {isLoading ? (
-          <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-[13px] text-slate-600">
-            Cargando solicitudes...
-          </p>
-        ) : null}
-
-        {!isLoading && !requests.length ? (
-          <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-[13px] text-slate-600">
-            Aún no hay solicitudes con este filtro.
-          </p>
-        ) : null}
-
+      <CardContent>
+        {isLoading ? <EmptyState text="Cargando solicitudes..." /> : null}
+        {!isLoading && !requests.length ? <EmptyState text="Aún no hay solicitudes con este filtro." /> : null}
         <div className="grid gap-3">
           {requests.map((request) => (
             <QuoteRequestCard key={request.id} request={request} onOpen={() => onOpenRequest(request)} />
@@ -515,25 +650,43 @@ function QuoteRequestsInbox({
 
 function QuoteRequestDetailPanel({
   request,
+  quoteSupplierId,
+  quoteFile,
+  quoteReceivedAt,
+  quoteObservations,
   isLoading,
   notice,
+  isEmailPending,
+  isQuotePending,
   onBack,
   onPrint,
+  onGenerateEmail,
+  onQuoteSupplierChange,
+  onQuoteFileChange,
+  onQuoteReceivedAtChange,
+  onQuoteObservationsChange,
+  onSubmitQuote,
 }: {
   request: QuoteRequest | null;
+  quoteSupplierId: string;
+  quoteFile: File | null;
+  quoteReceivedAt: string;
+  quoteObservations: string;
   isLoading: boolean;
   notice: string | null;
+  isEmailPending: boolean;
+  isQuotePending: boolean;
   onBack: () => void;
   onPrint: () => void;
+  onGenerateEmail: (supplierId: string) => void;
+  onQuoteSupplierChange: (value: string) => void;
+  onQuoteFileChange: (file: File | null) => void;
+  onQuoteReceivedAtChange: (value: string) => void;
+  onQuoteObservationsChange: (value: string) => void;
+  onSubmitQuote: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   if (isLoading && !request) {
-    return (
-      <Card>
-        <CardContent className="p-6">
-          <p className="text-[13px] text-slate-600">Cargando detalle de la solicitud...</p>
-        </CardContent>
-      </Card>
-    );
+    return <EmptyState text="Cargando detalle de la solicitud..." />;
   }
 
   if (!request) {
@@ -550,94 +703,300 @@ function QuoteRequestDetailPanel({
   }
 
   return (
-    <Card>
-      <CardHeader className="space-y-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-bold text-ink">{request.number}</h2>
-              <Badge tone={statusTone[request.status]}>{statusLabels[request.status]}</Badge>
-            </div>
-            <p className="mt-1 text-[13px] font-semibold text-slate-700">{request.project}</p>
-            <p className="mt-1 text-xs text-slate-500">Solicitud creada el {formatDate(request.createdAt)}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={onBack}>
-              <Inbox className="h-4 w-4" />
-              Bandeja
-            </Button>
-            <Button type="button" onClick={onPrint}>
-              <Printer className="h-4 w-4" />
-              Imprimir
-            </Button>
-          </div>
-        </div>
-        {notice ? (
-          <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-[13px] text-brand-700">
-            {notice}
-          </div>
-        ) : null}
-      </CardHeader>
-
-      <CardContent className="space-y-4">
-        <section className="grid gap-3 md:grid-cols-4">
-          <DetailBox label="Proyecto" value={request.project} />
-          <DetailBox label="Centro de costo" value={request.costCenter ?? "Sin centro"} />
-          <DetailBox label="Solicitante" value={request.requesterName} />
-          <DetailBox label="Fecha límite" value={request.deadline ? formatDate(request.deadline) : "Sin fecha"} />
-        </section>
-
-        <section>
-          <h3 className="mb-2 text-sm font-bold text-ink">Ítems solicitados</h3>
-          <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[54px_1fr_110px_110px] bg-slate-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-              <span>No.</span>
-              <span>Descripción</span>
-              <span>Cantidad</span>
-              <span>Unidad</span>
-            </div>
-            {request.items.map((item) => (
-              <div key={item.id} className="grid grid-cols-[54px_1fr_110px_110px] gap-3 border-t border-border px-3 py-3 text-[13px]">
-                <span className="font-bold text-slate-500">{item.lineNumber}</span>
-                <div>
-                  <p className="font-semibold text-ink">{item.description}</p>
-                  {item.technicalSpecs ? <p className="mt-1 leading-5 text-slate-500">{item.technicalSpecs}</p> : null}
-                </div>
-                <span className="font-semibold text-ink">{Number(item.quantity).toLocaleString("es-DO")}</span>
-                <span className="text-slate-600">{item.unit}</span>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="space-y-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-bold text-ink">{request.number}</h2>
+                <Badge tone={statusTone[request.status]}>{statusLabels[request.status]}</Badge>
+                <Badge tone="blue">{request.quoteCount} cotizaciones</Badge>
               </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
-          <div>
-            <h3 className="mb-2 text-sm font-bold text-ink">Observaciones generales</h3>
-            <div className="min-h-24 rounded-lg border border-border bg-slate-50 p-3 text-[13px] leading-6 text-slate-700">
-              {request.observations || "Sin observaciones."}
+              <p className="mt-1 text-[13px] font-semibold text-slate-700">{request.project}</p>
+              <p className="mt-1 text-xs text-slate-500">Solicitud creada el {formatDate(request.createdAt)}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={onBack}>
+                <Inbox className="h-4 w-4" />
+                Bandeja
+              </Button>
+              <Button type="button" onClick={onPrint}>
+                <Printer className="h-4 w-4" />
+                Imprimir
+              </Button>
             </div>
           </div>
-          <div>
-            <h3 className="mb-2 text-sm font-bold text-ink">Adjuntos</h3>
-            <div className="space-y-2">
-              {request.attachments.length ? (
-                request.attachments.map((attachment) => (
-                  <div key={attachment.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs">
-                    <FileText className="h-4 w-4 text-brand-700" />
-                    <div className="min-w-0">
-                      <p className="truncate font-bold text-ink">{attachment.fileName}</p>
-                      <p className="text-slate-500">{formatBytes(attachment.sizeBytes)}</p>
+          {notice ? <Notice>{notice}</Notice> : null}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <section className="grid gap-3 md:grid-cols-4">
+            <DetailBox label="Proyecto" value={request.project} />
+            <DetailBox label="Centro de costo" value={request.costCenter ?? "Sin centro"} />
+            <DetailBox label="Solicitante" value={request.requesterName} />
+            <DetailBox label="Fecha límite" value={request.deadline ? formatDate(request.deadline) : "Sin fecha"} />
+          </section>
+          <RequestItemsTable request={request} />
+        </CardContent>
+      </Card>
+
+      <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <Card>
+          <CardHeader>
+            <h3 className="text-base font-bold text-ink">Suplidores y correos</h3>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {request.suppliers.length ? (
+              request.suppliers.map((entry) => {
+                const hasQuote = request.quotes.some((quote) => quote.supplierId === entry.supplierId);
+                return (
+                  <div key={entry.id} className="rounded-lg border border-border p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-ink">{entry.supplier.name}</p>
+                        <p className="mt-1 text-xs text-slate-500">{entry.contactName ?? "Contacto principal"} · {entry.contactEmail ?? "Sin correo"}</p>
+                        <p className="mt-1 text-xs text-slate-500">{entry.contactPhone ?? entry.supplier.phone ?? "Sin teléfono"}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {hasQuote ? <Badge tone="green">Cotizó</Badge> : <Badge tone="amber">Pendiente</Badge>}
+                        <Button type="button" variant="outline" size="sm" disabled={isEmailPending} onClick={() => onGenerateEmail(entry.supplierId)}>
+                          <Mail className="h-4 w-4" />
+                          Correo
+                        </Button>
+                      </div>
                     </div>
+                  </div>
+                );
+              })
+            ) : (
+              <EmptyState text="Esta solicitud no tiene suplidores seleccionados." />
+            )}
+
+            <div className="rounded-lg border border-border bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Historial de correos</p>
+              {request.emailLogs.length ? (
+                <div className="space-y-2">
+                  {request.emailLogs.slice(0, 6).map((log) => (
+                    <div key={log.id} className="flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-ink">{log.recipientEmail}</p>
+                        <p className="text-slate-500">{formatDateTime(log.createdAt)}</p>
+                      </div>
+                      <Badge tone="blue">{log.status}</Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Aún no se ha preparado ningún correo.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <h3 className="text-base font-bold text-ink">Recepción de cotizaciones</h3>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <form className="grid gap-3 rounded-lg border border-border bg-slate-50 p-3 md:grid-cols-[1fr_150px] md:items-end" onSubmit={onSubmitQuote}>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Suplidor</span>
+                <select
+                  className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]"
+                  value={quoteSupplierId}
+                  onChange={(event) => onQuoteSupplierChange(event.target.value)}
+                >
+                  {request.suppliers.map((entry) => (
+                    <option key={entry.supplierId} value={entry.supplierId}>
+                      {entry.supplier.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Recepción</span>
+                <Input type="date" value={quoteReceivedAt} onChange={(event) => onQuoteReceivedAtChange(event.target.value)} />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Archivo original</span>
+                <input
+                  type="file"
+                  className="block w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px]"
+                  onChange={(event) => onQuoteFileChange(event.target.files?.[0] ?? null)}
+                />
+                {quoteFile ? <p className="mt-1 text-xs text-slate-500">{quoteFile.name} · {formatBytes(quoteFile.size)}</p> : null}
+              </label>
+              <label className="block md:col-span-2">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-600">Observaciones</span>
+                <textarea
+                  className="min-h-16 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  value={quoteObservations}
+                  onChange={(event) => onQuoteObservationsChange(event.target.value)}
+                  placeholder="Notas internas sobre la cotización recibida."
+                />
+              </label>
+              <Button type="submit" disabled={isQuotePending || !request.suppliers.length} className="md:col-span-2">
+                <FileUp className="h-4 w-4" />
+                {isQuotePending ? "Analizando..." : "Registrar y analizar cotización"}
+              </Button>
+            </form>
+
+            <div className="space-y-2">
+              {request.quotes.length ? (
+                request.quotes.map((quote) => (
+                  <div key={quote.id} className="rounded-lg border border-border p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-ink">{quote.supplier.name}</p>
+                        <p className="truncate text-xs text-slate-500">{quote.fileName} · {formatDate(quote.receivedAt)}</p>
+                      </div>
+                      <Badge tone={quote.reviewStatus === "ANALIZADA" ? "green" : "amber"}>{quote.reviewStatus}</Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">{quote.lines.length} líneas detectadas</p>
                   </div>
                 ))
               ) : (
-                <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-[13px] text-slate-600">
-                  Esta solicitud no tiene adjuntos.
-                </p>
+                <EmptyState text="Aún no hay cotizaciones registradas." />
               )}
             </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <ComparisonTable request={request} />
+    </div>
+  );
+}
+
+function RequestItemsTable({ request }: { request: QuoteRequest }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-bold text-ink">Ítems solicitados</h3>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="grid grid-cols-[54px_1fr_110px_110px] bg-slate-50 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+          <span>No.</span>
+          <span>Descripción</span>
+          <span>Cantidad</span>
+          <span>Unidad</span>
+        </div>
+        {request.items.map((item) => (
+          <div key={item.id} className="grid grid-cols-[54px_1fr_110px_110px] gap-3 border-t border-border px-3 py-3 text-[13px]">
+            <span className="font-bold text-slate-500">{item.lineNumber}</span>
+            <div>
+              <p className="font-semibold text-ink">{item.description}</p>
+              {item.technicalSpecs ? <p className="mt-1 leading-5 text-slate-500">{item.technicalSpecs}</p> : null}
+            </div>
+            <span className="font-semibold text-ink">{Number(item.quantity).toLocaleString("es-DO")}</span>
+            <span className="text-slate-600">{item.unit}</span>
           </div>
-        </section>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-4 lg:grid-cols-[1fr_0.8fr]">
+        <div className="rounded-lg border border-border bg-slate-50 p-3 text-[13px] leading-6 text-slate-700">
+          {request.observations || "Sin observaciones generales."}
+        </div>
+        <div className="rounded-lg border border-border p-3">
+          <p className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Adjuntos</p>
+          {request.attachments.length ? (
+            <div className="space-y-2">
+              {request.attachments.map((attachment) => (
+                <div key={attachment.id} className="flex items-center gap-2 text-xs">
+                  <FileText className="h-4 w-4 text-brand-700" />
+                  <span className="truncate font-semibold text-ink">{attachment.fileName}</span>
+                  <span className="text-slate-500">{formatBytes(attachment.sizeBytes)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">Sin adjuntos.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ComparisonTable({ request }: { request: QuoteRequest }) {
+  const hasOffers = request.comparison.rows.some((row) => row.offers.some((offer) => offer.quoteId));
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h3 className="text-base font-bold text-ink">Comparación automática</h3>
+          <p className="text-xs text-slate-500">Cada fila es un ítem solicitado y cada columna representa un suplidor.</p>
+        </div>
+        <Badge tone={hasOffers ? "green" : "slate"}>
+          <Sparkles className="h-3.5 w-3.5" />
+          {hasOffers ? "Análisis activo" : "Esperando cotizaciones"}
+        </Badge>
+      </CardHeader>
+      <CardContent>
+        {!request.suppliers.length ? <EmptyState text="Selecciona suplidores para construir el cuadro comparativo." /> : null}
+        {request.suppliers.length && !hasOffers ? <EmptyState text="Registra cotizaciones para ver precios, marcas, tiempos y diferencias." /> : null}
+        {request.suppliers.length ? (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="min-w-[980px] w-full border-collapse text-[12px]">
+              <thead>
+                <tr className="bg-slate-50 text-left text-slate-500">
+                  <th className="w-56 border-b border-border px-3 py-2 font-bold uppercase tracking-[0.12em]">Ítem</th>
+                  {request.comparison.suppliers.map((supplier) => (
+                    <th key={supplier.supplierId} className="min-w-56 border-b border-l border-border px-3 py-2 align-top">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-bold text-ink">{supplier.supplierName}</p>
+                          <p className="mt-1 flex items-center gap-1 text-slate-500">
+                            <Star className="h-3 w-3" />
+                            {supplier.rating || 0}/5
+                          </p>
+                        </div>
+                        {supplier.quoteId ? <Badge tone="green">Recibida</Badge> : <Badge tone="amber">Pendiente</Badge>}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {request.comparison.rows.map((row) => (
+                  <tr key={row.item.id} className="border-t border-border">
+                    <td className="bg-white px-3 py-3 align-top">
+                      <p className="font-bold text-ink">{row.item.lineNumber}. {row.item.description}</p>
+                      <p className="mt-1 text-slate-500">{Number(row.item.quantity).toLocaleString("es-DO")} {row.item.unit}</p>
+                    </td>
+                    {row.offers.map((offer) => (
+                      <td key={`${row.item.id}-${offer.supplierId}`} className="border-l border-border px-3 py-3 align-top">
+                        {offer.quoteId ? (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-1">
+                              {offer.isBestPrice ? <Badge tone="green">Mejor precio</Badge> : null}
+                              {offer.isBestDelivery ? <Badge tone="blue">Mejor entrega</Badge> : null}
+                              {offer.matchScore !== null ? <Badge tone={offer.matchScore >= 60 ? "green" : "amber"}>{offer.matchScore}% match</Badge> : null}
+                            </div>
+                            <p><span className="font-semibold text-slate-500">Unitario:</span> {formatMoney(offer.unitPrice)}</p>
+                            <p><span className="font-semibold text-slate-500">Total:</span> {formatMoney(offer.totalPrice)}</p>
+                            <p><span className="font-semibold text-slate-500">Marca:</span> {offer.brand ?? "N/D"}</p>
+                            <p><span className="font-semibold text-slate-500">Modelo:</span> {offer.model ?? "N/D"}</p>
+                            <p><span className="font-semibold text-slate-500">Entrega:</span> {offer.leadTime ?? "N/D"}</p>
+                            <p><span className="font-semibold text-slate-500">Garantía:</span> {offer.warranty ?? "N/D"}</p>
+                            <p><span className="font-semibold text-slate-500">Disponibilidad:</span> {offer.availability ?? "N/D"}</p>
+                            {offer.differences ? (
+                              <p className="rounded-md bg-amber-50 px-2 py-1 text-amber-700">
+                                <AlertTriangle className="mr-1 inline h-3 w-3" />
+                                {offer.differences}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">Sin cotización</span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -691,28 +1050,15 @@ function QuoteRequestCard({ request, onOpen }: { request: QuoteRequest; onOpen: 
             <Badge tone={statusTone[request.status]}>{statusLabels[request.status]}</Badge>
           </div>
           <p className="mt-1 truncate text-[13px] font-semibold text-slate-700">{request.project}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {request.requesterName} · {formatDate(request.createdAt)}
-          </p>
+          <p className="mt-1 text-xs text-slate-500">{request.requesterName} · {formatDate(request.createdAt)}</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-500 sm:text-right">
           <div>
-            <p className="font-semibold text-ink">{request.itemCount} ítems</p>
-            <p>{request.attachmentCount} adjuntos</p>
+            <p className="font-semibold text-ink">{request.supplierCount} suplidores</p>
+            <p>{request.quoteCount} cotizaciones</p>
           </div>
           <Eye className="h-4 w-4 text-brand-700" />
         </div>
-      </div>
-
-      <div className="mt-3 space-y-1.5">
-        {request.items.slice(0, 3).map((item) => (
-          <div key={item.id} className="flex items-center justify-between gap-3 text-xs text-slate-600">
-            <span className="truncate">{item.description}</span>
-            <span className="shrink-0 font-semibold">
-              {Number(item.quantity).toLocaleString("es-DO")} {item.unit}
-            </span>
-          </div>
-        ))}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -721,6 +1067,7 @@ function QuoteRequestCard({ request, onOpen }: { request: QuoteRequest; onOpen: 
           Límite: {request.deadline ? formatDate(request.deadline) : "Sin fecha"}
         </span>
         {request.costCenter ? <span className="rounded-md bg-slate-50 px-2 py-1">{request.costCenter}</span> : null}
+        <span className="rounded-md bg-slate-50 px-2 py-1">{request.itemCount} ítems</span>
       </div>
     </button>
   );
@@ -735,16 +1082,39 @@ function DetailBox({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <Card>
       <CardContent className="p-4">
-        <ClipboardList className="mb-2.5 h-5 w-5 text-brand-700" />
+        <Icon className="mb-2.5 h-5 w-5 text-brand-700" />
         <p className="text-[13px] font-semibold text-slate-500">{label}</p>
         <p className="mt-1.5 truncate text-2xl font-bold text-ink">{value}</p>
       </CardContent>
     </Card>
   );
+}
+
+function FileChip({ name, detail, onRemove }: { name: string; detail: string; onRemove: () => void }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-white px-2.5 py-2 text-xs">
+      <FileText className="h-4 w-4 text-brand-700" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-bold text-ink">{name}</p>
+        <p className="text-slate-500">{detail}</p>
+      </div>
+      <Button type="button" variant="ghost" size="icon" title="Quitar adjunto" onClick={onRemove}>
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-[13px] text-slate-600">{text}</p>;
+}
+
+function Notice({ children }: { children: string }) {
+  return <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-[13px] text-brand-700">{children}</div>;
 }
 
 function printQuoteRequest(request: QuoteRequest) {
@@ -801,16 +1171,15 @@ function printQuoteRequest(request: QuoteRequest) {
     </div>
 
     <div class="section">
+      <h2>Suplidores invitados</h2>
+      <p>${escapeHtml(request.suppliers.map((entry) => entry.supplier.name).join(", ") || "Sin suplidores.")}</p>
+    </div>
+
+    <div class="section">
       <h2>Ítems solicitados</h2>
       <table>
         <thead>
-          <tr>
-            <th>No.</th>
-            <th>Descripción</th>
-            <th>Cantidad</th>
-            <th>Unidad</th>
-            <th>Especificaciones</th>
-          </tr>
+          <tr><th>No.</th><th>Descripción</th><th>Cantidad</th><th>Unidad</th><th>Especificaciones</th></tr>
         </thead>
         <tbody>
           ${request.items
@@ -834,11 +1203,6 @@ function printQuoteRequest(request: QuoteRequest) {
       <h2>Observaciones</h2>
       <p>${escapeHtml(request.observations || "Sin observaciones.")}</p>
     </div>
-
-    <div class="section">
-      <h2>Adjuntos</h2>
-      <p>${escapeHtml(request.attachments.map((attachment) => attachment.fileName).join(", ") || "Sin adjuntos.")}</p>
-    </div>
   </body>
 </html>
 `);
@@ -860,8 +1224,20 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#039;");
 }
 
+function formatMoney(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "N/D";
+  }
+
+  return new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(value);
+}
+
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("es-DO");
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" });
 }
 
 function formatBytes(bytes: number) {

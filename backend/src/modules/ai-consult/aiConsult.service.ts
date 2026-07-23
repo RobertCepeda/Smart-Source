@@ -9,6 +9,7 @@ import {
   deleteOpenAiFile,
   deleteVectorStore,
   deleteVectorStoreFile,
+  extractTextFromImageWithOpenAi,
   isOpenAiEnabled,
   uploadFileToVectorStore,
   uploadTextToVectorStore,
@@ -240,6 +241,17 @@ function createSummary(parsed: Pick<ParsedDocument, "text" | "structured">, file
 export async function parseUploadedDocument(file: Express.Multer.File): Promise<ParsedDocument> {
   const extension = extensionOf(file.originalname);
 
+  if (isImageFile(file, extension)) {
+    const openAiText = await extractTextFromImageWithOpenAi(file);
+    const text = limitText(openAiText?.text ?? "");
+    const structured: StructuredDocument = { kind: "text" };
+    const summary = text
+      ? createSummary({ text, structured }, file.originalname)
+      : "Imagen cargada correctamente. Configura OPENAI_API_KEY para leer su contenido automaticamente con OCR.";
+
+    return { text, structured, summary };
+  }
+
   if (["xlsx", "xls", "csv"].includes(extension)) {
     const sheets = workbookToSheets(file.buffer);
     const text = limitText(rowsToText(sheets));
@@ -276,6 +288,10 @@ export async function parseUploadedDocument(file: Express.Multer.File): Promise<
   const text = limitText(file.buffer.toString("utf8"));
   const structured: StructuredDocument = { kind: "text" };
   return { text, structured, summary: createSummary({ text, structured }, file.originalname) };
+}
+
+function isImageFile(file: Express.Multer.File, extension: string) {
+  return file.mimetype.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff"].includes(extension);
 }
 
 export async function createAiDocument(

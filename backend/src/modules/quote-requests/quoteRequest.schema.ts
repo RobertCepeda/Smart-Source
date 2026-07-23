@@ -24,6 +24,7 @@ export const createQuoteRequestSchema = z.object({
   requesterName: z.string().trim().max(120).optional(),
   deadline: z.string().trim().optional(),
   observations: z.string().trim().max(1500).optional(),
+  supplierIds: z.array(z.string().min(1)).max(40).optional().default([]),
   items: z
     .array(
       z.object({
@@ -35,4 +36,15 @@ export const createQuoteRequestSchema = z.object({
     )
     .min(1, "Agrega al menos un item.")
     .max(80, "Divide la solicitud si tienes más de 80 items."),
+});
+
+export const quoteRequestSupplierParamsSchema = z.object({
+  id: z.string().min(1),
+  supplierId: z.string().min(1),
+});
+
+export const createSupplierQuoteSchema = z.object({
+  supplierId: z.string().min(1, "Selecciona el suplidor que envió la cotización."),
+  receivedAt: z.string().trim().optional(),
+  observations: z.string().trim().max(1200).optional(),
 });

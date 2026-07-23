@@ -12,6 +12,12 @@ type OpenAiAnswer = {
   model: string;
 };
 
+type OpenAiImageText = {
+  text: string;
+  responseId: string | null;
+  model: string;
+};
+
 const SYSTEM_INSTRUCTIONS = `
 Eres el asistente de documentos de Smart Source. Responde siempre en espanol natural, amable y profesional.
 
@@ -213,6 +219,47 @@ export async function answerWithOpenAi(
 
   return {
     answer: extractOutputText(response),
+    responseId: response.id ?? null,
+    model: env.OPENAI_MODEL,
+  };
+}
+
+export async function extractTextFromImageWithOpenAi(file: Express.Multer.File): Promise<OpenAiImageText | null> {
+  const openai = getClient();
+  if (!openai) {
+    return null;
+  }
+
+  const mimeType = file.mimetype || "image/png";
+  const dataUrl = `data:${mimeType};base64,${file.buffer.toString("base64")}`;
+  const response = await openai.responses.create({
+    model: env.OPENAI_MODEL,
+    instructions: [
+      "Eres el lector OCR de Smart Source.",
+      "Extrae todo el texto visible de la imagen con fidelidad.",
+      "Si parece una cotizacion, factura o solicitud, conserva tablas, cantidades, unidades, precios, marcas, modelos, impuestos, fechas y tiempos de entrega.",
+      "No inventes datos. Si algo no se entiende, escribe [ilegible].",
+    ].join(" "),
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Lee esta imagen y devuelve el texto estructurado de forma clara para poder analizarlo como cotizacion o documento de compra.",
+          },
+          {
+            type: "input_image",
+            image_url: dataUrl,
+            detail: "high",
+          },
+        ],
+      },
+    ],
+  } as any);
+
+  return {
+    text: extractOutputText(response),
     responseId: response.id ?? null,
     model: env.OPENAI_MODEL,
   };
