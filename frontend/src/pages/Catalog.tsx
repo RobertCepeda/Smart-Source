@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, PackagePlus, RotateCcw, Search, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { ArrowLeft, Eye, PackagePlus, RotateCcw, Search, Trash2 } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -29,14 +29,33 @@ const emptyItem: CatalogItemPayload = {
   description: "",
 };
 
+const QUOTE_REQUEST_DRAFT_KEY = "smart_source_quote_request_draft_v1";
+
 export function Catalog() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<CatalogFilters>({});
   const [itemForm, setItemForm] = useState<CatalogItemPayload>(emptyItem);
   const [newCategory, setNewCategory] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [hasQuoteRequestDraft, setHasQuoteRequestDraft] = useState(false);
+  const fromQuoteRequest = searchParams.get("from") === "quote-request";
+  const suggestedItemName = searchParams.get("name")?.trim() ?? "";
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setHasQuoteRequestDraft(Boolean(window.localStorage.getItem(QUOTE_REQUEST_DRAFT_KEY)));
+    }
+
+    if (fromQuoteRequest) {
+      if (suggestedItemName) {
+        setItemForm((current) => (current.name.trim() ? current : { ...current, name: suggestedItemName }));
+      }
+      setNotice("Tu solicitud quedó guardada como borrador. Agrega el ítem y vuelve cuando termines.");
+    }
+  }, [fromQuoteRequest, suggestedItemName]);
 
   const itemsQuery = useQuery({
     queryKey: ["catalog-items", filters],
@@ -73,7 +92,7 @@ export function Catalog() {
     mutationFn: () => createCatalogItemRequest(token!, itemForm),
     onSuccess: async () => {
       setItemForm(emptyItem);
-      setNotice("Ítem agregado al catálogo.");
+      setNotice(fromQuoteRequest ? "Ítem agregado al catálogo. Ya puedes volver al borrador de la solicitud." : "Ítem agregado al catálogo.");
       await queryClient.invalidateQueries({ queryKey: ["catalog-items"] });
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos guardar el ítem."),
@@ -115,7 +134,31 @@ export function Catalog() {
         eyebrow="Módulo 2"
         title="Catálogo"
         description="Administra materiales, servicios, categorías y marcas para conectarlos con tus suplidores."
+        actions={
+          fromQuoteRequest || hasQuoteRequestDraft ? (
+            <Link
+              to="/quote-requests"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition hover:bg-slate-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Volver a solicitud
+            </Link>
+          ) : null
+        }
       />
+
+      {fromQuoteRequest ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-brand-100 bg-brand-50/70 px-3 py-2.5 text-[13px] text-brand-800 sm:flex-row sm:items-center sm:justify-between">
+          <span>Tu solicitud se guardó como borrador. Registra el material y vuelve para seleccionarlo.</span>
+          <Link
+            to="/quote-requests"
+            className="inline-flex h-8 items-center justify-center gap-2 rounded-lg bg-ink px-3 text-xs font-bold text-white transition hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Volver
+          </Link>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card><CardContent className="p-4"><p className="text-[13px] font-semibold text-slate-500">Ítems</p><p className="mt-1.5 text-2xl font-bold">{stats.total}</p></CardContent></Card>

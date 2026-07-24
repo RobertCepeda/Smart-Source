@@ -11,6 +11,7 @@ import {
   Inbox,
   Mail,
   Paperclip,
+  PackagePlus,
   Plus,
   Printer,
   Search,
@@ -32,8 +33,10 @@ import {
   createQuoteRequestRequest,
   generateQuoteRequestEmailRequest,
   getQuoteRequestRequest,
+  listCatalogItemsRequest,
   listQuoteRequestsRequest,
   listSuppliersRequest,
+  type CatalogItem,
   type QuoteRequest,
   type QuoteRequestPayload,
   type QuoteRequestStatus,
@@ -43,6 +46,8 @@ import {
 type ViewMode = "create" | "list" | "detail";
 
 type RequestLineForm = {
+  catalogItemId?: string;
+  catalogSearch: string;
   description: string;
   quantity: string;
   unit: string;
@@ -50,11 +55,25 @@ type RequestLineForm = {
 };
 
 const emptyLine: RequestLineForm = {
+  catalogSearch: "",
   description: "",
   quantity: "1",
   unit: "unidad",
   technicalSpecs: "",
 };
+
+type QuoteRequestDraft = {
+  updatedAt: string;
+  project: string;
+  costCenter: string;
+  requesterName: string;
+  deadline: string;
+  observations: string;
+  selectedSupplierIds: string[];
+  lines: RequestLineForm[];
+};
+
+const QUOTE_REQUEST_DRAFT_KEY = "smart_source_quote_request_draft_v1";
 
 const statusLabels: Record<QuoteRequestStatus, string> = {
   BORRADOR: "Borrador",
@@ -74,6 +93,72 @@ const statusTone: Record<QuoteRequestStatus, "slate" | "green" | "amber" | "blue
   CANCELADA: "amber",
 };
 
+function normalizeDraftLine(line: Partial<RequestLineForm>): RequestLineForm {
+  return {
+    catalogItemId: line.catalogItemId,
+    catalogSearch: line.catalogSearch ?? line.description ?? "",
+    description: line.description ?? "",
+    quantity: line.quantity ?? "1",
+    unit: line.unit ?? "unidad",
+    technicalSpecs: line.technicalSpecs ?? "",
+  };
+}
+
+function readQuoteRequestDraft(): QuoteRequestDraft | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawDraft = window.localStorage.getItem(QUOTE_REQUEST_DRAFT_KEY);
+    if (!rawDraft) {
+      return null;
+    }
+
+    const draft = JSON.parse(rawDraft) as Partial<QuoteRequestDraft>;
+    return {
+      updatedAt: draft.updatedAt ?? new Date().toISOString(),
+      project: draft.project ?? "",
+      costCenter: draft.costCenter ?? "",
+      requesterName: draft.requesterName ?? "",
+      deadline: draft.deadline ?? "",
+      observations: draft.observations ?? "",
+      selectedSupplierIds: draft.selectedSupplierIds ?? [],
+      lines: draft.lines?.length ? draft.lines.map(normalizeDraftLine) : [{ ...emptyLine }],
+    };
+  } catch {
+    window.localStorage.removeItem(QUOTE_REQUEST_DRAFT_KEY);
+    return null;
+  }
+}
+
+function writeQuoteRequestDraft(draft: QuoteRequestDraft) {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(QUOTE_REQUEST_DRAFT_KEY, JSON.stringify(draft));
+  }
+}
+
+function clearQuoteRequestDraft() {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(QUOTE_REQUEST_DRAFT_KEY);
+  }
+}
+
+function resolveLineDescription(line: RequestLineForm) {
+  return (line.description || line.catalogSearch).trim();
+}
+
+function hasDraftContent(draft: Omit<QuoteRequestDraft, "updatedAt">) {
+  return Boolean(
+    draft.project.trim() ||
+      draft.costCenter.trim() ||
+      draft.deadline.trim() ||
+      draft.observations.trim() ||
+      draft.selectedSupplierIds.length ||
+      draft.lines.some((line) => resolveLineDescription(line) || line.technicalSpecs.trim()),
+  );
+}
+
 export function QuoteRequests() {
   const { token, user } = useAuth();
   const queryClient = useQueryClient();
@@ -91,17 +176,72 @@ export function QuoteRequests() {
   const [statusFilter, setStatusFilter] = useState<QuoteRequestStatus | "">("");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!requesterPrefilled && user?.name) {
-      setRequesterName(user.name);
-      setRequesterPrefilled(true);
+    const draft = readQuoteRequestDraft();
+
+    if (draft) {
+      setProject(draft.project);
+      setCostCenter(draft.costCenter);
+      setRequesterName(draft.requesterName);
+      setDeadline(draft.deadline);
+      setObservations(draft.observations);
+      setLines(draft.lines);
+      setSelectedSupplierIds(draft.selectedSupplierIds);
+      setDraftUpdatedAt(draft.updatedAt);
+      setRequesterPrefilled(Boolean(draft.requesterName));
+      setNotice("Borrador restaurado automaticamente.");
     }
-  }, [requesterPrefilled, user?.name]);
+
+    setDraftHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydrated || requesterPrefilled || requesterName.trim() || !user?.name) {
+      return;
+    }
+
+    setRequesterName(user.name);
+    setRequesterPrefilled(true);
+  }, [draftHydrated, requesterName, requesterPrefilled, user?.name]);
+
+  useEffect(() => {
+    if (!draftHydrated) {
+      return;
+    }
+
+    const draftWithoutDate = {
+      project,
+      costCenter,
+      requesterName,
+      deadline,
+      observations,
+      selectedSupplierIds,
+      lines,
+    };
+
+    if (!hasDraftContent(draftWithoutDate)) {
+      clearQuoteRequestDraft();
+      setDraftUpdatedAt(null);
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    writeQuoteRequestDraft({ ...draftWithoutDate, updatedAt });
+    setDraftUpdatedAt(updatedAt);
+  }, [costCenter, deadline, draftHydrated, lines, observations, project, requesterName, selectedSupplierIds]);
 
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "quote-requests"],
     queryFn: () => listSuppliersRequest(token!),
+    enabled: Boolean(token),
+  });
+
+  const catalogItemsQuery = useQuery({
+    queryKey: ["catalog-items", "quote-request-picker"],
+    queryFn: () => listCatalogItemsRequest(token!),
     enabled: Boolean(token),
   });
 
@@ -117,6 +257,7 @@ export function QuoteRequests() {
 
   const requests = useMemo(() => requestsQuery.data?.requests ?? [], [requestsQuery.data?.requests]);
   const suppliers = useMemo(() => suppliersQuery.data?.suppliers ?? [], [suppliersQuery.data?.suppliers]);
+  const catalogItems = useMemo(() => catalogItemsQuery.data?.items ?? [], [catalogItemsQuery.data?.items]);
   const selectedRequestFromList = requests.find((request) => request.id === selectedRequestId) ?? null;
 
   const requestDetailQuery = useQuery({
@@ -141,6 +282,8 @@ export function QuoteRequests() {
     mutationFn: ({ payload, files }: { payload: QuoteRequestPayload; files: File[] }) =>
       createQuoteRequestRequest(token!, payload, files),
     onSuccess: async ({ request }) => {
+      clearQuoteRequestDraft();
+      setDraftUpdatedAt(null);
       setNotice(`Solicitud ${request.number} creada correctamente.`);
       setProject("");
       setCostCenter("");
@@ -183,6 +326,24 @@ export function QuoteRequests() {
     setLines((current) => current.map((line, lineIndex) => (lineIndex === index ? { ...line, [key]: value } : line)));
   }
 
+  function selectCatalogItem(index: number, item: CatalogItem) {
+    setNotice(null);
+    setLines((current) =>
+      current.map((line, lineIndex) =>
+        lineIndex === index
+          ? {
+              ...line,
+              catalogItemId: item.id,
+              catalogSearch: item.name,
+              description: item.name,
+              unit: item.unit || line.unit || "unidad",
+              technicalSpecs: item.description || line.technicalSpecs,
+            }
+          : line,
+      ),
+    );
+  }
+
   function addLine() {
     setLines((current) => [...current, { ...emptyLine }]);
   }
@@ -203,14 +364,29 @@ export function QuoteRequests() {
     setSelectedSupplierIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
   }
 
+  function discardDraft() {
+    clearQuoteRequestDraft();
+    setDraftUpdatedAt(null);
+    setProject("");
+    setCostCenter("");
+    setDeadline("");
+    setObservations("");
+    setLines([{ ...emptyLine }]);
+    setAttachments([]);
+    setSelectedSupplierIds([]);
+    setRequesterName(user?.name ?? "");
+    setRequesterPrefilled(Boolean(user?.name));
+    setNotice("Borrador descartado.");
+  }
+
   function submitRequest(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setNotice(null);
 
     const validLines = lines
-      .filter((line) => line.description.trim() && Number(line.quantity) > 0 && line.unit.trim())
+      .filter((line) => resolveLineDescription(line) && Number(line.quantity) > 0 && line.unit.trim())
       .map((line) => ({
-        description: line.description.trim(),
+        description: resolveLineDescription(line),
         quantity: Number(line.quantity),
         unit: line.unit.trim(),
         technicalSpecs: line.technicalSpecs.trim(),
@@ -282,6 +458,7 @@ export function QuoteRequests() {
         <CreateQuoteRequestPanel
           suppliers={suppliers}
           selectedSupplierIds={selectedSupplierIds}
+          catalogItems={catalogItems}
           project={project}
           costCenter={costCenter}
           requesterName={requesterName}
@@ -292,17 +469,21 @@ export function QuoteRequests() {
           notice={notice}
           isPending={createMutation.isPending}
           isLoadingSuppliers={suppliersQuery.isLoading}
+          isLoadingCatalog={catalogItemsQuery.isLoading}
+          draftUpdatedAt={draftUpdatedAt}
           onProjectChange={setProject}
           onCostCenterChange={setCostCenter}
           onRequesterNameChange={setRequesterName}
           onDeadlineChange={setDeadline}
           onObservationsChange={setObservations}
           onUpdateLine={updateLine}
+          onSelectCatalogItem={selectCatalogItem}
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onAddAttachments={addAttachments}
           onRemoveAttachment={(index) => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))}
           onToggleSupplier={toggleSupplier}
+          onDiscardDraft={discardDraft}
           onSubmit={submitRequest}
         />
       ) : null}
@@ -337,6 +518,7 @@ export function QuoteRequests() {
 function CreateQuoteRequestPanel({
   suppliers,
   selectedSupplierIds,
+  catalogItems,
   project,
   costCenter,
   requesterName,
@@ -347,21 +529,26 @@ function CreateQuoteRequestPanel({
   notice,
   isPending,
   isLoadingSuppliers,
+  isLoadingCatalog,
+  draftUpdatedAt,
   onProjectChange,
   onCostCenterChange,
   onRequesterNameChange,
   onDeadlineChange,
   onObservationsChange,
   onUpdateLine,
+  onSelectCatalogItem,
   onAddLine,
   onRemoveLine,
   onAddAttachments,
   onRemoveAttachment,
   onToggleSupplier,
+  onDiscardDraft,
   onSubmit,
 }: {
   suppliers: Supplier[];
   selectedSupplierIds: string[];
+  catalogItems: CatalogItem[];
   project: string;
   costCenter: string;
   requesterName: string;
@@ -372,21 +559,37 @@ function CreateQuoteRequestPanel({
   notice: string | null;
   isPending: boolean;
   isLoadingSuppliers: boolean;
+  isLoadingCatalog: boolean;
+  draftUpdatedAt: string | null;
   onProjectChange: (value: string) => void;
   onCostCenterChange: (value: string) => void;
   onRequesterNameChange: (value: string) => void;
   onDeadlineChange: (value: string) => void;
   onObservationsChange: (value: string) => void;
   onUpdateLine: (index: number, key: keyof RequestLineForm, value: string) => void;
+  onSelectCatalogItem: (index: number, item: CatalogItem) => void;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onAddAttachments: (files: FileList | null) => void;
   onRemoveAttachment: (index: number) => void;
   onToggleSupplier: (id: string) => void;
+  onDiscardDraft: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
+      {draftUpdatedAt ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-brand-100 bg-brand-50/70 px-3 py-2.5 text-[13px] text-brand-800 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Borrador guardado automaticamente. Ultimo cambio: {formatDateTime(draftUpdatedAt)}
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={onDiscardDraft}>
+            <Trash2 className="h-4 w-4 text-red-600" />
+            Descartar
+          </Button>
+        </div>
+      ) : null}
+
       <Card>
         <CardHeader>
           <h2 className="text-base font-bold text-ink">Datos de la solicitud</h2>
@@ -455,7 +658,16 @@ function CreateQuoteRequestPanel({
         </CardHeader>
         <CardContent className="space-y-2">
           {lines.map((line, index) => (
-            <RequestLineEditor key={index} index={index} line={line} onUpdate={onUpdateLine} onRemove={onRemoveLine} />
+            <RequestLineEditor
+              key={index}
+              index={index}
+              line={line}
+              catalogItems={catalogItems}
+              isLoadingCatalog={isLoadingCatalog}
+              onUpdate={onUpdateLine}
+              onSelectCatalogItem={onSelectCatalogItem}
+              onRemove={onRemoveLine}
+            />
           ))}
         </CardContent>
       </Card>
@@ -904,26 +1116,137 @@ function ComparisonTable({ request }: { request: QuoteRequest }) {
 function RequestLineEditor({
   index,
   line,
+  catalogItems,
+  isLoadingCatalog,
   onUpdate,
+  onSelectCatalogItem,
   onRemove,
 }: {
   index: number;
   line: RequestLineForm;
+  catalogItems: CatalogItem[];
+  isLoadingCatalog: boolean;
   onUpdate: (index: number, key: keyof RequestLineForm, value: string) => void;
+  onSelectCatalogItem: (index: number, item: CatalogItem) => void;
   onRemove: (index: number) => void;
 }) {
+  const selectedCatalogItem = line.catalogItemId ? catalogItems.find((item) => item.id === line.catalogItemId) : null;
+  const catalogQuery = (line.catalogSearch || line.description).trim();
+  const catalogMatches = useMemo(() => {
+    const words = catalogQuery.toLowerCase().split(/\s+/).filter(Boolean);
+
+    if (!words.length) {
+      return catalogItems.slice(0, 4);
+    }
+
+    return catalogItems
+      .filter((item) => {
+        const searchable = [
+          item.name,
+          item.unit,
+          item.description,
+          item.category?.name,
+          item.brand?.name,
+          item.type === "MATERIAL" ? "material" : "servicio",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return words.every((word) => searchable.includes(word));
+      })
+      .slice(0, 6);
+  }, [catalogItems, catalogQuery]);
+  const catalogUrl = `/catalog?from=quote-request&name=${encodeURIComponent(catalogQuery)}`;
+
+  function handleCatalogSearch(value: string) {
+    onUpdate(index, "catalogSearch", value);
+
+    if (line.catalogItemId) {
+      onUpdate(index, "catalogItemId", "");
+      onUpdate(index, "description", "");
+    }
+  }
+
   return (
-    <div className="grid gap-2 rounded-lg border border-border p-3 lg:grid-cols-[1fr_86px_110px_36px] lg:items-start">
-      <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold text-slate-500">Descripción</span>
-        <Input value={line.description} onChange={(event) => onUpdate(index, "description", event.target.value)} placeholder="Ej. Cable THHN #12 rojo" />
+    <div className="grid gap-3 rounded-lg border border-border bg-slate-50/70 p-3 lg:grid-cols-[minmax(0,1fr)_86px_110px_36px] lg:items-start">
+      <div className="min-w-0">
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+          <span className="block text-xs font-semibold text-slate-500">Material, equipo o servicio</span>
+          {selectedCatalogItem ? <Badge tone="green">Seleccionado</Badge> : <Badge tone="slate">Catálogo</Badge>}
+        </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            value={line.catalogSearch}
+            onChange={(event) => handleCatalogSearch(event.target.value)}
+            placeholder="Buscar por nombre, categoría, marca o unidad"
+          />
+        </div>
+
+        <div className="mt-2 grid gap-2 xl:grid-cols-2">
+          {isLoadingCatalog ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500 xl:col-span-2">
+              Cargando catálogo...
+            </div>
+          ) : null}
+
+          {!isLoadingCatalog &&
+            catalogMatches.map((item) => {
+              const isSelected = item.id === line.catalogItemId;
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`rounded-lg border bg-white px-3 py-2 text-left transition ${
+                    isSelected ? "border-brand-300 bg-brand-50" : "border-border hover:border-brand-200 hover:bg-white"
+                  }`}
+                  onClick={() => onSelectCatalogItem(index, item)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-bold text-ink">{item.name}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                        {item.category?.name ?? "Sin categoría"} · {item.brand?.name ?? "Sin marca"}
+                      </p>
+                    </div>
+                    {isSelected ? <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-700" /> : null}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <Badge tone={item.type === "MATERIAL" ? "green" : "blue"}>{item.type === "MATERIAL" ? "Material" : "Servicio"}</Badge>
+                    {item.unit ? <Badge tone="slate">{item.unit}</Badge> : null}
+                    {item.supplierCount ? <Badge tone="slate">{item.supplierCount} supl.</Badge> : null}
+                  </div>
+                </button>
+              );
+            })}
+
+          {!isLoadingCatalog && !catalogMatches.length ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500 xl:col-span-2">
+              No aparece en el catálogo todavía.
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
+          <span>Si no está registrado, agrégalo al catálogo y vuelve al borrador.</span>
+          <Link
+            to={catalogUrl}
+            className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-ink px-2.5 font-bold text-white transition hover:bg-slate-800"
+          >
+            <PackagePlus className="h-3.5 w-3.5" />
+            Agregar material
+          </Link>
+        </div>
         <textarea
           className="mt-2 min-h-16 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
           value={line.technicalSpecs}
           onChange={(event) => onUpdate(index, "technicalSpecs", event.target.value)}
           placeholder="Especificaciones técnicas, marca sugerida, norma o detalle."
         />
-      </label>
+      </div>
       <label className="block">
         <span className="mb-1.5 block text-xs font-semibold text-slate-500">Cantidad</span>
         <Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
