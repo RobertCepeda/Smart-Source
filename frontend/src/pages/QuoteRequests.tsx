@@ -340,18 +340,40 @@ export function QuoteRequests() {
           : line,
       );
       const hasOpenPicker = updatedLines.some((line, lineIndex) => lineIndex !== index && !line.catalogItemId && !line.description.trim());
-      const shouldAppendPicker = index === current.length - 1 && !hasOpenPicker;
+      const shouldAppendPicker = !hasOpenPicker;
 
       return shouldAppendPicker ? [...updatedLines, { ...emptyLine }] : updatedLines;
     });
   }
 
   function addLine() {
-    setLines((current) => [...current, { ...emptyLine }]);
+    setLines((current) => (current.some((line) => !line.catalogItemId && !line.description.trim()) ? current : [...current, { ...emptyLine }]));
   }
 
   function removeLine(index: number) {
-    setLines((current) => (current.length === 1 ? current : current.filter((_, lineIndex) => lineIndex !== index)));
+    setLines((current) => {
+      const nextLines = current.filter((_, lineIndex) => lineIndex !== index);
+
+      return nextLines.length ? nextLines : [{ ...emptyLine }];
+    });
+  }
+
+  function editLineMaterial(index: number) {
+    setNotice(null);
+    setLines((current) =>
+      current
+        .map((line, lineIndex) =>
+          lineIndex === index
+            ? {
+                ...line,
+                catalogItemId: "",
+                catalogSearch: "",
+                description: "",
+              }
+            : line,
+        )
+        .filter((line, lineIndex) => lineIndex === index || line.catalogItemId || line.description.trim()),
+    );
   }
 
   function addAttachments(fileList: FileList | null) {
@@ -483,6 +505,7 @@ export function QuoteRequests() {
           onObservationsChange={setObservations}
           onUpdateLine={updateLine}
           onSelectCatalogItem={selectCatalogItem}
+          onEditLineMaterial={editLineMaterial}
           onCreateUnit={(index, name) => createUnitMutation.mutate({ index, name })}
           onAddLine={addLine}
           onRemoveLine={removeLine}
@@ -547,6 +570,7 @@ function CreateQuoteRequestPanel({
   onObservationsChange,
   onUpdateLine,
   onSelectCatalogItem,
+  onEditLineMaterial,
   onCreateUnit,
   onAddLine,
   onRemoveLine,
@@ -581,6 +605,7 @@ function CreateQuoteRequestPanel({
   onObservationsChange: (value: string) => void;
   onUpdateLine: (index: number, key: keyof RequestLineForm, value: string) => void;
   onSelectCatalogItem: (index: number, item: CatalogItem) => void;
+  onEditLineMaterial: (index: number) => void;
   onCreateUnit: (index: number, name: string) => void;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
@@ -591,6 +616,9 @@ function CreateQuoteRequestPanel({
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
   const hasOpenMaterialPicker = lines.some((line) => !line.catalogItemId && !line.description.trim());
+  const lineEntries = lines.map((line, index) => ({ line, index }));
+  const pickerLineEntries = lineEntries.filter(({ line }) => !line.catalogItemId && !line.description.trim());
+  const addedLineEntries = lineEntries.filter(({ line }) => line.catalogItemId || line.description.trim());
 
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
@@ -672,23 +700,72 @@ function CreateQuoteRequestPanel({
             Agregar
           </Button>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {lines.map((line, index) => (
-            <RequestLineEditor
-              key={index}
-              index={index}
-              line={line}
-              catalogItems={catalogItems}
-              units={units}
-              isLoadingCatalog={isLoadingCatalog}
-              isLoadingUnits={isLoadingUnits}
-              isCreatingUnit={isCreatingUnit}
-              onUpdate={onUpdateLine}
-              onSelectCatalogItem={onSelectCatalogItem}
-              onCreateUnit={onCreateUnit}
-              onRemove={onRemoveLine}
-            />
-          ))}
+        <CardContent className="space-y-3">
+          <div className="rounded-lg border border-border bg-slate-50/70 p-3">
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-[13px] font-bold text-ink">Agregar material</h3>
+                <p className="text-xs text-slate-500">Busca en el catálogo y selecciona el material que va en la solicitud.</p>
+              </div>
+              <Badge tone="slate">Catálogo</Badge>
+            </div>
+            <div className="space-y-2">
+              {pickerLineEntries.map(({ line, index }) => (
+                <RequestLineEditor
+                  key={`picker-${index}`}
+                  index={index}
+                  line={line}
+                  catalogItems={catalogItems}
+                  units={units}
+                  isLoadingCatalog={isLoadingCatalog}
+                  isLoadingUnits={isLoadingUnits}
+                  isCreatingUnit={isCreatingUnit}
+                  onUpdate={onUpdateLine}
+                  onSelectCatalogItem={onSelectCatalogItem}
+                  onEditMaterial={onEditLineMaterial}
+                  onCreateUnit={onCreateUnit}
+                  onRemove={onRemoveLine}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-[13px] font-bold text-ink">Materiales agregados</h3>
+                <p className="text-xs text-slate-500">Estos son los ítems que ya entrarán en la solicitud.</p>
+              </div>
+              <Badge tone={addedLineEntries.length ? "green" : "slate"}>{addedLineEntries.length} agregados</Badge>
+            </div>
+            {addedLineEntries.length ? (
+              <div className="space-y-2">
+                {addedLineEntries.map(({ line, index }, order) => (
+                  <RequestLineEditor
+                    key={`added-${index}`}
+                    index={index}
+                    displayOrder={order}
+                    line={line}
+                    catalogItems={catalogItems}
+                    units={units}
+                    isLoadingCatalog={isLoadingCatalog}
+                    isLoadingUnits={isLoadingUnits}
+                    isCreatingUnit={isCreatingUnit}
+                    onUpdate={onUpdateLine}
+                    onSelectCatalogItem={onSelectCatalogItem}
+                    onEditMaterial={onEditLineMaterial}
+                    onCreateUnit={onCreateUnit}
+                    onRemove={onRemoveLine}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-brand-200 bg-white/70 px-3 py-3 text-xs text-slate-500">
+                Todavía no has agregado materiales. Selecciona uno arriba para verlo aquí.
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end pt-1">
             <Button type="button" variant="outline" size="sm" onClick={onAddLine} disabled={hasOpenMaterialPicker}>
               <Plus className="h-4 w-4" />
@@ -1141,6 +1218,7 @@ function ComparisonTable({ request }: { request: QuoteRequest }) {
 
 function RequestLineEditor({
   index,
+  displayOrder,
   line,
   catalogItems,
   units,
@@ -1149,10 +1227,12 @@ function RequestLineEditor({
   isCreatingUnit,
   onUpdate,
   onSelectCatalogItem,
+  onEditMaterial,
   onCreateUnit,
   onRemove,
 }: {
   index: number;
+  displayOrder?: number;
   line: RequestLineForm;
   catalogItems: CatalogItem[];
   units: UnitOfMeasure[];
@@ -1161,6 +1241,7 @@ function RequestLineEditor({
   isCreatingUnit: boolean;
   onUpdate: (index: number, key: keyof RequestLineForm, value: string) => void;
   onSelectCatalogItem: (index: number, item: CatalogItem) => void;
+  onEditMaterial: (index: number) => void;
   onCreateUnit: (index: number, name: string) => void;
   onRemove: (index: number) => void;
 }) {
@@ -1245,9 +1326,7 @@ function RequestLineEditor({
   }
 
   function clearMaterialSelection() {
-    onUpdate(index, "catalogItemId", "");
-    onUpdate(index, "description", "");
-    onUpdate(index, "catalogSearch", "");
+    onEditMaterial(index);
     setIsDetailsOpen(false);
   }
 
@@ -1289,13 +1368,24 @@ function RequestLineEditor({
   );
 
   if (hasSelectedMaterial) {
+    const rowNumber = typeof displayOrder === "number" ? displayOrder + 1 : index + 1;
+
     return (
-      <div className="rounded-lg border border-border bg-white">
+      <div className="rounded-lg border border-brand-100 bg-white shadow-sm">
         <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="truncate text-[13px] font-bold text-ink">
-              {index + 1}. {materialName}
-            </p>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-xs font-black text-brand-700">
+              {rowNumber}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-bold text-ink">{materialName}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <Badge tone="green">Agregado</Badge>
+                <span className="text-[11px] text-slate-500">
+                  {line.quantity || "0"} {line.unit || "sin unidad"}
+                </span>
+              </div>
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => setIsDetailsOpen((current) => !current)}>
