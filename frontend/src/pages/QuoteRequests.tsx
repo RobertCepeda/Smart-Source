@@ -102,6 +102,28 @@ function resolveLineDescription(line: RequestLineForm) {
   return (line.description || line.catalogSearch).trim();
 }
 
+function isMaterialPickerLine(line: RequestLineForm) {
+  return !line.catalogItemId && !line.description.trim();
+}
+
+function ensureMaterialPicker(lines: RequestLineForm[]) {
+  let hasPicker = false;
+  const cleanLines = lines.filter((line) => {
+    if (!isMaterialPickerLine(line)) {
+      return true;
+    }
+
+    if (hasPicker) {
+      return false;
+    }
+
+    hasPicker = true;
+    return true;
+  });
+
+  return hasPicker ? cleanLines : [...cleanLines, { ...emptyLine }];
+}
+
 function hasDraftContent(draft: QuoteRequestDraftPayload) {
   return Boolean(
     draft.project.trim() ||
@@ -180,7 +202,7 @@ export function QuoteRequests() {
       setRequesterName(draft.payload.requesterName);
       setDeadline(draft.payload.deadline);
       setObservations(draft.payload.observations);
-      setLines(draft.payload.lines?.length ? draft.payload.lines.map(normalizeDraftLine) : [{ ...emptyLine }]);
+      setLines(ensureMaterialPicker(draft.payload.lines?.length ? draft.payload.lines.map(normalizeDraftLine) : [{ ...emptyLine }]));
       setSelectedSupplierIds(draft.payload.selectedSupplierIds ?? []);
       setDraftUpdatedAt(draft.updatedAt);
       setRequesterPrefilled(Boolean(draft.payload.requesterName));
@@ -339,40 +361,38 @@ export function QuoteRequests() {
             }
           : line,
       );
-      const hasOpenPicker = updatedLines.some((line, lineIndex) => lineIndex !== index && !line.catalogItemId && !line.description.trim());
+      const hasOpenPicker = updatedLines.some((line, lineIndex) => lineIndex !== index && isMaterialPickerLine(line));
       const shouldAppendPicker = !hasOpenPicker;
 
-      return shouldAppendPicker ? [...updatedLines, { ...emptyLine }] : updatedLines;
+      return ensureMaterialPicker(shouldAppendPicker ? [...updatedLines, { ...emptyLine }] : updatedLines);
     });
-  }
-
-  function addLine() {
-    setLines((current) => (current.some((line) => !line.catalogItemId && !line.description.trim()) ? current : [...current, { ...emptyLine }]));
   }
 
   function removeLine(index: number) {
     setLines((current) => {
       const nextLines = current.filter((_, lineIndex) => lineIndex !== index);
 
-      return nextLines.length ? nextLines : [{ ...emptyLine }];
+      return ensureMaterialPicker(nextLines.length ? nextLines : [{ ...emptyLine }]);
     });
   }
 
   function editLineMaterial(index: number) {
     setNotice(null);
     setLines((current) =>
-      current
-        .map((line, lineIndex) =>
-          lineIndex === index
-            ? {
-                ...line,
-                catalogItemId: "",
-                catalogSearch: "",
-                description: "",
-              }
-            : line,
-        )
-        .filter((line, lineIndex) => lineIndex === index || line.catalogItemId || line.description.trim()),
+      ensureMaterialPicker(
+        current
+          .map((line, lineIndex) =>
+            lineIndex === index
+              ? {
+                  ...line,
+                  catalogItemId: "",
+                  catalogSearch: "",
+                  description: "",
+                }
+              : line,
+          )
+          .filter((line, lineIndex) => lineIndex === index || line.catalogItemId || line.description.trim()),
+      ),
     );
   }
 
@@ -507,7 +527,6 @@ export function QuoteRequests() {
           onSelectCatalogItem={selectCatalogItem}
           onEditLineMaterial={editLineMaterial}
           onCreateUnit={(index, name) => createUnitMutation.mutate({ index, name })}
-          onAddLine={addLine}
           onRemoveLine={removeLine}
           onAddAttachments={addAttachments}
           onRemoveAttachment={(index) => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))}
@@ -572,7 +591,6 @@ function CreateQuoteRequestPanel({
   onSelectCatalogItem,
   onEditLineMaterial,
   onCreateUnit,
-  onAddLine,
   onRemoveLine,
   onAddAttachments,
   onRemoveAttachment,
@@ -607,7 +625,6 @@ function CreateQuoteRequestPanel({
   onSelectCatalogItem: (index: number, item: CatalogItem) => void;
   onEditLineMaterial: (index: number) => void;
   onCreateUnit: (index: number, name: string) => void;
-  onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onAddAttachments: (files: FileList | null) => void;
   onRemoveAttachment: (index: number) => void;
@@ -615,9 +632,8 @@ function CreateQuoteRequestPanel({
   onDiscardDraft: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
-  const hasOpenMaterialPicker = lines.some((line) => !line.catalogItemId && !line.description.trim());
   const lineEntries = lines.map((line, index) => ({ line, index }));
-  const pickerLineEntries = lineEntries.filter(({ line }) => !line.catalogItemId && !line.description.trim());
+  const pickerLineEntries = lineEntries.filter(({ line }) => isMaterialPickerLine(line));
   const addedLineEntries = lineEntries.filter(({ line }) => line.catalogItemId || line.description.trim());
 
   return (
@@ -693,12 +709,8 @@ function CreateQuoteRequestPanel({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader>
           <h2 className="text-base font-bold text-ink">Materiales, equipos o servicios</h2>
-          <Button type="button" variant="outline" size="sm" onClick={onAddLine} disabled={hasOpenMaterialPicker}>
-            <Plus className="h-4 w-4" />
-            Agregar
-          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="rounded-lg border border-border bg-slate-50/70 p-3">
@@ -764,13 +776,6 @@ function CreateQuoteRequestPanel({
                 Todavía no has agregado materiales. Selecciona uno arriba para verlo aquí.
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onAddLine} disabled={hasOpenMaterialPicker}>
-              <Plus className="h-4 w-4" />
-              Agregar material abajo
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -1372,7 +1377,7 @@ function RequestLineEditor({
 
     return (
       <div className="rounded-lg border border-brand-100 bg-white shadow-sm">
-        <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid gap-3 px-3 py-2.5 lg:grid-cols-[minmax(0,1fr)_110px_190px_auto] lg:items-start">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-xs font-black text-brand-700">
               {rowNumber}
@@ -1387,7 +1392,12 @@ function RequestLineEditor({
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-500">Cantidad</span>
+            <Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
+          </label>
+          {compactUnitControl}
+          <div className="flex shrink-0 items-center gap-2 lg:pt-5">
             <Button type="button" variant="outline" size="sm" onClick={() => setIsDetailsOpen((current) => !current)}>
               <Eye className="h-4 w-4" />
               {isDetailsOpen ? "Ocultar" : "Ver detalles"}
@@ -1421,12 +1431,7 @@ function RequestLineEditor({
               </div>
             ) : null}
 
-            <div className="grid gap-3 md:grid-cols-[110px_180px_1fr]">
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-500">Cantidad</span>
-                <Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
-              </label>
-              {compactUnitControl}
+            <div className="grid gap-3">
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold text-slate-500">Especificaciones</span>
                 <textarea
