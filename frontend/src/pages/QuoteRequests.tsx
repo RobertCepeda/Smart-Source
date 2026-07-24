@@ -742,16 +742,16 @@ function CreateQuoteRequestPanel({
             </div>
           </div>
 
-          <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
+          <div className="rounded-lg border border-border bg-white p-2.5">
             <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-[13px] font-bold text-ink">Materiales agregados</h3>
-                <p className="text-xs text-slate-500">Estos son los ítems que ya entrarán en la solicitud.</p>
+                <h3 className="text-xs font-bold text-ink">Materiales agregados</h3>
+                <p className="text-[11px] text-slate-500">Ítems listos para esta solicitud.</p>
               </div>
               <Badge tone={addedLineEntries.length ? "green" : "slate"}>{addedLineEntries.length} agregados</Badge>
             </div>
             {addedLineEntries.length ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {addedLineEntries.map(({ line, index }, order) => (
                   <RequestLineEditor
                     key={`added-${index}`}
@@ -1337,9 +1337,9 @@ function RequestLineEditor({
 
   const compactUnitControl = (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold text-slate-500">Unidad</span>
+      <span className="mb-1 block text-[11px] font-semibold text-slate-500">Unidad</span>
       <select
-        className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+        className="h-8 w-full rounded-lg border border-border bg-white px-2.5 text-xs text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
         value={line.unit}
         onChange={(event) => onUpdate(index, "unit", event.target.value)}
         disabled={isLoadingUnits}
@@ -1353,9 +1353,9 @@ function RequestLineEditor({
         ))}
       </select>
       {isAddingUnit ? (
-        <div className="mt-2 rounded-lg border border-border bg-white p-2">
-          <Input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Nueva unidad" />
-          <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <div className="mt-1.5 rounded-lg border border-border bg-white p-1.5">
+          <Input className="h-8 text-xs" value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Nueva unidad" />
+          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
             <Button type="button" size="sm" disabled={isCreatingUnit} onClick={submitNewUnit}>
               Guardar
             </Button>
@@ -1365,7 +1365,7 @@ function RequestLineEditor({
           </div>
         </div>
       ) : (
-        <button type="button" className="mt-1.5 text-[11px] font-bold text-brand-700 hover:text-brand-900" onClick={() => setIsAddingUnit(true)}>
+        <button type="button" className="mt-1 text-[10px] font-bold text-brand-700 hover:text-brand-900" onClick={() => setIsAddingUnit(true)}>
           + Agregar unidad
         </button>
       )}
@@ -1376,15 +1376,15 @@ function RequestLineEditor({
     const rowNumber = typeof displayOrder === "number" ? displayOrder + 1 : index + 1;
 
     return (
-      <div className="rounded-lg border border-brand-100 bg-white shadow-sm">
-        <div className="grid gap-3 px-3 py-2.5 lg:grid-cols-[minmax(0,1fr)_110px_190px_auto] lg:items-start">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-xs font-black text-brand-700">
+      <div className="rounded-lg border border-border bg-white shadow-sm">
+        <div className="grid gap-2 px-2.5 py-2 lg:grid-cols-[minmax(0,1fr)_90px_160px_auto] lg:items-start">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-[11px] font-black text-brand-700">
               {rowNumber}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-[13px] font-bold text-ink">{materialName}</p>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <p className="truncate text-xs font-bold text-ink">{materialName}</p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                 <Badge tone="green">Agregado</Badge>
                 <span className="text-[11px] text-slate-500">
                   {line.quantity || "0"} {line.unit || "sin unidad"}
@@ -1393,49 +1393,49 @@ function RequestLineEditor({
             </div>
           </div>
           <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-500">Cantidad</span>
-            <Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
+            <span className="mb-1 block text-[11px] font-semibold text-slate-500">Cantidad</span>
+            <Input className="h-8 text-xs" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
           </label>
           {compactUnitControl}
-          <div className="flex shrink-0 items-center gap-2 lg:pt-5">
-            <Button type="button" variant="outline" size="sm" onClick={() => setIsDetailsOpen((current) => !current)}>
-              <Eye className="h-4 w-4" />
+          <div className="flex shrink-0 items-center gap-1.5 lg:pt-5">
+            <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => setIsDetailsOpen((current) => !current)}>
+              <Eye className="h-3.5 w-3.5" />
               {isDetailsOpen ? "Ocultar" : "Ver detalles"}
             </Button>
-            <Button type="button" variant="outline" size="icon" title="Quitar material" onClick={() => onRemove(index)}>
-              <Trash2 className="h-4 w-4 text-red-600" />
+            <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Quitar material" onClick={() => onRemove(index)}>
+              <Trash2 className="h-3.5 w-3.5 text-red-600" />
             </Button>
           </div>
         </div>
 
         {isDetailsOpen ? (
-          <div className="border-t border-border bg-slate-50/70 p-3">
+          <div className="border-t border-border bg-slate-50/60 p-2.5">
             {selectedCatalogItem ? (
-              <div className="mb-3 grid gap-2 sm:grid-cols-4">
-                <div className="rounded-lg border border-border bg-white px-3 py-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Categoría</p>
-                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.category?.name ?? "Sin categoría"}</p>
+              <div className="mb-2 grid gap-1.5 sm:grid-cols-4">
+                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Categoría</p>
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.category?.name ?? "Sin categoría"}</p>
                 </div>
-                <div className="rounded-lg border border-border bg-white px-3 py-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Marca</p>
-                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.brand?.name ?? "Sin marca"}</p>
+                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Marca</p>
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.brand?.name ?? "Sin marca"}</p>
                 </div>
-                <div className="rounded-lg border border-border bg-white px-3 py-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipo</p>
-                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.type === "MATERIAL" ? "Material" : "Servicio"}</p>
+                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Tipo</p>
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.type === "MATERIAL" ? "Material" : "Servicio"}</p>
                 </div>
-                <div className="rounded-lg border border-border bg-white px-3 py-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Suplidores</p>
-                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.supplierCount || 0} asociados</p>
+                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Suplidores</p>
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.supplierCount || 0} asociados</p>
                 </div>
               </div>
             ) : null}
 
-            <div className="grid gap-3">
+            <div className="grid gap-2">
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-slate-500">Especificaciones</span>
+                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Especificaciones</span>
                 <textarea
-                  className="min-h-20 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  className="min-h-16 w-full rounded-lg border border-border bg-white px-2.5 py-2 text-xs text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
                   value={line.technicalSpecs}
                   onChange={(event) => onUpdate(index, "technicalSpecs", event.target.value)}
                   placeholder="Especificaciones técnicas, marca sugerida, norma o detalle."
@@ -1443,9 +1443,9 @@ function RequestLineEditor({
               </label>
             </div>
 
-            <div className="mt-3 flex justify-end">
-              <Button type="button" variant="ghost" size="sm" onClick={clearMaterialSelection}>
-                Cambiar material
+            <div className="mt-2 flex justify-end">
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearMaterialSelection}>
+                Editar nombre
               </Button>
             </div>
           </div>
