@@ -146,6 +146,15 @@ export type CatalogItem = {
   supplierCount: number;
 };
 
+export type UnitOfMeasure = {
+  id: string;
+  name: string;
+  abbreviation: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CatalogItemDetailSupplier = {
   supplierId: string;
   itemId: string;
@@ -473,6 +482,30 @@ export type QuoteRequestPayload = {
     unit: string;
     technicalSpecs?: string;
   }>;
+};
+
+export type QuoteRequestDraftPayload = {
+  project: string;
+  costCenter: string;
+  requesterName: string;
+  deadline: string;
+  observations: string;
+  selectedSupplierIds: string[];
+  lines: Array<{
+    catalogItemId?: string;
+    catalogSearch: string;
+    description: string;
+    quantity: string;
+    unit: string;
+    technicalSpecs: string;
+  }>;
+};
+
+export type QuoteRequestDraft = {
+  id: string;
+  payload: QuoteRequestDraftPayload;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type QuoteRequestFilters = {
@@ -862,6 +895,28 @@ export async function listBrandsRequest(token: string) {
   });
 }
 
+export async function listUnitsRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listUnits();
+  }
+
+  return apiRequest<{ units: UnitOfMeasure[] }>("/units", {
+    headers: authHeaders(token),
+  });
+}
+
+export async function createUnitRequest(token: string, payload: { name: string; abbreviation?: string }) {
+  if (isDemoMode) {
+    return demoApi.createUnit(payload);
+  }
+
+  return apiRequest<{ unit: UnitOfMeasure }>("/units", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function createBrandRequest(token: string, name: string) {
   if (isDemoMode) {
     return demoApi.createBrand(name);
@@ -967,6 +1022,44 @@ export async function createQuoteRequestRequest(token: string, payload: QuoteReq
   }
 
   return data as { request: QuoteRequest };
+}
+
+export async function getQuoteRequestDraftRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.getQuoteRequestDraft();
+  }
+
+  return apiRequest<{ draft: QuoteRequestDraft | null }>("/quote-requests/draft", {
+    headers: authHeaders(token),
+  });
+}
+
+export async function saveQuoteRequestDraftRequest(token: string, payload: QuoteRequestDraftPayload) {
+  if (isDemoMode) {
+    return demoApi.saveQuoteRequestDraft(payload);
+  }
+
+  return apiRequest<{ draft: QuoteRequestDraft }>("/quote-requests/draft", {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteQuoteRequestDraftRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.deleteQuoteRequestDraft();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/quote-requests/draft`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(data.message ?? "No pudimos eliminar el borrador.");
+  }
 }
 
 export async function getQuoteRequestRequest(token: string, id: string) {

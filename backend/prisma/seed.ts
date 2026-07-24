@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../src/lib/prisma";
 
 async function main() {
+  await prisma.quoteRequestDraft.deleteMany();
   await prisma.supportMessage.deleteMany();
   await prisma.supportTicket.deleteMany();
   await prisma.priceHistory.deleteMany();
@@ -13,6 +14,7 @@ async function main() {
   await prisma.item.deleteMany();
   await prisma.supplier.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.unitOfMeasure.deleteMany();
   await prisma.organization.deleteMany();
   await prisma.category.deleteMany();
   await prisma.brand.deleteMany();
@@ -47,6 +49,46 @@ async function main() {
   const [acme, delta, nexans, truper] = await Promise.all(
     ["Acme", "Delta", "Nexans", "Truper"].map((name) => prisma.brand.create({ data: { name, organizationId: organization.id } })),
   );
+
+  await prisma.unitOfMeasure.createMany({
+    data: [
+      ["unidad", "und"],
+      ["metro", "m"],
+      ["centímetro", "cm"],
+      ["milímetro", "mm"],
+      ["pie", "ft"],
+      ["pulgada", "in"],
+      ["metro cuadrado", "m2"],
+      ["metro cúbico", "m3"],
+      ["kilogramo", "kg"],
+      ["libra", "lb"],
+      ["tonelada", "ton"],
+      ["litro", "l"],
+      ["galón", "gal"],
+      ["funda", null],
+      ["saco", null],
+      ["caja", null],
+      ["paquete", null],
+      ["rollo", null],
+      ["tubo", null],
+      ["varilla", null],
+      ["plancha", null],
+      ["par", null],
+      ["juego", null],
+      ["lote", null],
+      ["servicio", null],
+      ["hora", "h"],
+      ["día", null],
+      ["semana", null],
+      ["mes", null],
+      ["viaje", null],
+    ].map(([name, abbreviation]) => ({
+      organizationId: organization.id,
+      name: String(name),
+      abbreviation: abbreviation ? String(abbreviation) : null,
+    })),
+    skipDuplicates: true,
+  });
 
   const [urgent, credit, certified, local, importTag] = await Promise.all(
     ["Urgente", "Crédito", "Certificado", "Local", "Importación"].map((name) =>

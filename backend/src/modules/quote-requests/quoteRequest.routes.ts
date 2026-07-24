@@ -7,15 +7,19 @@ import {
   createQuoteRequestSchema,
   createSupplierQuoteSchema,
   listQuoteRequestsQuerySchema,
+  quoteRequestDraftSchema,
   quoteRequestIdParamsSchema,
   quoteRequestSupplierParamsSchema,
 } from "./quoteRequest.schema";
 import {
   createQuoteRequest,
+  deleteQuoteRequestDraft,
   generateSupplierEmail,
   getQuoteRequest,
+  getQuoteRequestDraft,
   listQuoteRequests,
   registerSupplierQuote,
+  saveQuoteRequestDraft,
 } from "./quoteRequest.service";
 
 const upload = multer({
@@ -35,6 +39,16 @@ function organizationId(req: Express.Request) {
   }
 
   return req.user.organizationId;
+}
+
+function authUserId(req: Express.Request) {
+  if (!req.user?.id) {
+    const error = new Error("Necesitas iniciar sesion para guardar borradores.");
+    (error as Error & { status: number }).status = 401;
+    throw error;
+  }
+
+  return req.user.id;
 }
 
 function parseCreatePayload(req: Request) {
@@ -91,6 +105,33 @@ quoteRequestRouter.post("/", upload.array("attachments", 8), async (req, res, ne
       (req.files as Express.Multer.File[]) ?? [],
     );
     res.status(201).json({ request });
+  } catch (error) {
+    next(error);
+  }
+});
+
+quoteRequestRouter.get("/draft", async (req, res, next) => {
+  try {
+    const draft = await getQuoteRequestDraft(organizationId(req), authUserId(req));
+    res.json({ draft });
+  } catch (error) {
+    next(error);
+  }
+});
+
+quoteRequestRouter.put("/draft", validate({ body: quoteRequestDraftSchema }), async (req, res, next) => {
+  try {
+    const draft = await saveQuoteRequestDraft(organizationId(req), authUserId(req), quoteRequestDraftSchema.parse(req.body));
+    res.json({ draft });
+  } catch (error) {
+    next(error);
+  }
+});
+
+quoteRequestRouter.delete("/draft", async (req, res, next) => {
+  try {
+    await deleteQuoteRequestDraft(organizationId(req), authUserId(req));
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

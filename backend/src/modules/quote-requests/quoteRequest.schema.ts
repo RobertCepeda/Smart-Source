@@ -38,6 +38,25 @@ export const createQuoteRequestSchema = z.object({
     .max(80, "Divide la solicitud si tienes más de 80 items."),
 });
 
+const quoteRequestDraftLineSchema = z.object({
+  catalogItemId: z.string().trim().optional(),
+  catalogSearch: z.string().trim().max(260).optional().default(""),
+  description: z.string().trim().max(260).optional().default(""),
+  quantity: z.string().trim().max(40).optional().default("1"),
+  unit: z.string().trim().max(40).optional().default(""),
+  technicalSpecs: z.string().trim().max(1200).optional().default(""),
+});
+
+export const quoteRequestDraftSchema = z.object({
+  project: z.string().trim().max(160).optional().default(""),
+  costCenter: z.string().trim().max(80).optional().default(""),
+  requesterName: z.string().trim().max(120).optional().default(""),
+  deadline: z.string().trim().max(40).optional().default(""),
+  observations: z.string().trim().max(1500).optional().default(""),
+  selectedSupplierIds: z.array(z.string().min(1)).max(40).optional().default([]),
+  lines: z.array(quoteRequestDraftLineSchema).max(80).optional().default([]),
+});
+
 export const quoteRequestSupplierParamsSchema = z.object({
   id: z.string().min(1),
   supplierId: z.string().min(1),

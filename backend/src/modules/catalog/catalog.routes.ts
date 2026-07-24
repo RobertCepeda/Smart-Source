@@ -4,6 +4,7 @@ import { validate } from "../../middlewares/validate";
 import {
   createItemSchema,
   createNamedEntitySchema,
+  createUnitSchema,
   itemIdParamsSchema,
   listItemsQuerySchema,
   updateItemSchema,
@@ -12,12 +13,14 @@ import {
   createBrand,
   createCategory,
   createItem,
+  createUnit,
   deactivateItem,
   getItemDetail,
   listBrands,
   listCategories,
   listItems,
   listTags,
+  listUnits,
   updateItem,
 } from "./catalog.service";
 
@@ -35,11 +38,13 @@ export const itemRouter = Router();
 export const categoryRouter = Router();
 export const brandRouter = Router();
 export const tagRouter = Router();
+export const unitRouter = Router();
 
 itemRouter.use(authenticate);
 categoryRouter.use(authenticate);
 brandRouter.use(authenticate);
 tagRouter.use(authenticate);
+unitRouter.use(authenticate);
 
 itemRouter.get("/", validate({ query: listItemsQuerySchema }), async (req, res, next) => {
   try {
@@ -118,6 +123,23 @@ brandRouter.post("/", validate({ body: createNamedEntitySchema }), async (req, r
   try {
     const brand = await createBrand(organizationId(req), createNamedEntitySchema.parse(req.body));
     res.status(201).json({ brand });
+  } catch (error) {
+    next(error);
+  }
+});
+
+unitRouter.get("/", async (req, res, next) => {
+  try {
+    res.json({ units: await listUnits(organizationId(req)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+unitRouter.post("/", validate({ body: createUnitSchema }), async (req, res, next) => {
+  try {
+    const unit = await createUnit(organizationId(req), createUnitSchema.parse(req.body));
+    res.status(201).json({ unit });
   } catch (error) {
     next(error);
   }

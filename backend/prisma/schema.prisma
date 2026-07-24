@@ -29,6 +29,7 @@ model User {
   aiDocuments AiDocument[]
   aiQuestions AiQuestion[]
   quoteRequests QuoteRequest[]
+  quoteRequestDrafts QuoteRequestDraft[]
 
   @@index([email])
   @@index([organizationId])
@@ -49,12 +50,14 @@ model Organization {
   suppliers   Supplier[]
   categories  Category[]
   brands      Brand[]
+  units       UnitOfMeasure[]
   items       Item[]
   supportTickets SupportTicket[]
   aiChats AiChat[]
   aiDocuments AiDocument[]
   aiProductAliases AiProductAlias[]
   quoteRequests QuoteRequest[]
+  quoteRequestDrafts QuoteRequestDraft[]
 
   @@index([name])
 }
@@ -215,6 +218,22 @@ model Brand {
   @@index([organizationId])
 }
 
+model UnitOfMeasure {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  abbreviation   String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([name])
+}
+
 model Item {
   id           String              @id @default(cuid())
   organizationId String?
@@ -323,6 +342,23 @@ model QuoteRequest {
   @@index([status])
   @@index([deadline])
   @@index([createdAt])
+}
+
+model QuoteRequestDraft {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  payload        Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([updatedAt])
 }
 
 enum QuoteRequestStatus {

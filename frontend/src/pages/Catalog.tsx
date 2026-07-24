@@ -13,6 +13,7 @@ import {
   createCatalogItemRequest,
   createCategoryRequest,
   deleteCatalogItemRequest,
+  getQuoteRequestDraftRequest,
   listBrandsRequest,
   listCatalogItemsRequest,
   listCategoriesRequest,
@@ -29,8 +30,6 @@ const emptyItem: CatalogItemPayload = {
   description: "",
 };
 
-const QUOTE_REQUEST_DRAFT_KEY = "smart_source_quote_request_draft_v1";
-
 export function Catalog() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
@@ -40,15 +39,10 @@ export function Catalog() {
   const [newCategory, setNewCategory] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [hasQuoteRequestDraft, setHasQuoteRequestDraft] = useState(false);
   const fromQuoteRequest = searchParams.get("from") === "quote-request";
   const suggestedItemName = searchParams.get("name")?.trim() ?? "";
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setHasQuoteRequestDraft(Boolean(window.localStorage.getItem(QUOTE_REQUEST_DRAFT_KEY)));
-    }
-
     if (fromQuoteRequest) {
       if (suggestedItemName) {
         setItemForm((current) => (current.name.trim() ? current : { ...current, name: suggestedItemName }));
@@ -56,6 +50,12 @@ export function Catalog() {
       setNotice("Tu solicitud quedó guardada como borrador. Agrega el ítem y vuelve cuando termines.");
     }
   }, [fromQuoteRequest, suggestedItemName]);
+
+  const draftQuery = useQuery({
+    queryKey: ["quote-request-draft"],
+    queryFn: () => getQuoteRequestDraftRequest(token!),
+    enabled: Boolean(token),
+  });
 
   const itemsQuery = useQuery({
     queryKey: ["catalog-items", filters],
@@ -135,7 +135,7 @@ export function Catalog() {
         title="Catálogo"
         description="Administra materiales, servicios, categorías y marcas para conectarlos con tus suplidores."
         actions={
-          fromQuoteRequest || hasQuoteRequestDraft ? (
+          fromQuoteRequest || Boolean(draftQuery.data?.draft) ? (
             <Link
               to="/quote-requests"
               className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition hover:bg-slate-50"

@@ -33,6 +33,7 @@ import type {
   SupplierQuote,
   SupplierQuoteLine,
   SupportTicket,
+  UnitOfMeasure,
 } from "./api";
 
 export const demoToken = "smart-source-static-demo-token";
@@ -83,6 +84,41 @@ const brands: CatalogEntity[] = [
   { id: "brand_nexans", name: "Nexans" },
   { id: "brand_truper", name: "Truper" },
 ];
+
+let units: UnitOfMeasure[] = [
+  "unidad",
+  "metro",
+  "centímetro",
+  "milímetro",
+  "pie",
+  "pulgada",
+  "metro cuadrado",
+  "metro cúbico",
+  "kilogramo",
+  "libra",
+  "tonelada",
+  "litro",
+  "galón",
+  "funda",
+  "saco",
+  "caja",
+  "paquete",
+  "rollo",
+  "tubo",
+  "varilla",
+  "plancha",
+  "par",
+  "juego",
+  "lote",
+  "servicio",
+  "hora",
+  "día",
+  "semana",
+  "mes",
+  "viaje",
+].map((name) => makeUnit(name));
+
+let quoteRequestDraft: { id: string; payload: any; createdAt: string; updatedAt: string } | null = null;
 
 let catalogItems: CatalogItem[] = [
   makeItem("item_cement", "Cemento gris", "MATERIAL", "funda", "cat_construction", "brand_acme", 1),
@@ -485,6 +521,17 @@ export const demoApi = {
     brands.push(brand);
     return ok({ brand });
   },
+  listUnits: () => ok({ units }),
+  createUnit: (payload: { name: string; abbreviation?: string }) => {
+    const existing = units.find((unit) => unit.name.toLowerCase() === payload.name.trim().toLowerCase());
+    if (existing) {
+      return ok({ unit: existing });
+    }
+
+    const unit = makeUnit(payload.name.trim(), payload.abbreviation);
+    units = [...units, unit].sort((left, right) => left.name.localeCompare(right.name, "es"));
+    return ok({ unit });
+  },
   listSupportTickets: () => ok({ tickets: supportTickets }),
   createSupportTicket: (payload: { subject: string; category: string; priority: string; message: string }) => {
     const ticket: SupportTicket = {
@@ -531,7 +578,22 @@ export const demoApi = {
       payload.supplierIds ?? [],
     );
     quoteRequests = [request, ...quoteRequests];
+    quoteRequestDraft = null;
     return ok({ request });
+  },
+  getQuoteRequestDraft: () => ok({ draft: quoteRequestDraft }),
+  saveQuoteRequestDraft: (payload: any) => {
+    quoteRequestDraft = {
+      id: quoteRequestDraft?.id ?? "qr_draft_demo",
+      payload,
+      createdAt: quoteRequestDraft?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    return ok({ draft: quoteRequestDraft });
+  },
+  deleteQuoteRequestDraft: () => {
+    quoteRequestDraft = null;
+    return ok(undefined);
   },
   getQuoteRequest: (id: string) => ok({ request: quoteRequests.find((request) => request.id === id) ?? quoteRequests[0] }),
   generateQuoteRequestEmail: (requestId: string, supplierId: string) => {
@@ -729,6 +791,19 @@ export const demoApi = {
     }),
   listAdminSupportTickets: () => ok({ tickets: supportTickets }),
 };
+
+function makeUnit(name: string, abbreviation?: string): UnitOfMeasure {
+  const normalized = name.trim().toLowerCase();
+
+  return {
+    id: `unit_${normalized.replace(/[^a-z0-9]+/g, "_")}`,
+    name: normalized,
+    abbreviation: abbreviation || null,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 function makeItem(
   id: string,

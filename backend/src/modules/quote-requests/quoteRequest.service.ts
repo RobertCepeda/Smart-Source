@@ -1,11 +1,17 @@
 import type { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { parseUploadedDocument } from "../ai-consult/aiConsult.service";
-import type { createQuoteRequestSchema, createSupplierQuoteSchema, listQuoteRequestsQuerySchema } from "./quoteRequest.schema";
+import type {
+  createQuoteRequestSchema,
+  createSupplierQuoteSchema,
+  listQuoteRequestsQuerySchema,
+  quoteRequestDraftSchema,
+} from "./quoteRequest.schema";
 
 type CreateQuoteRequestInput = z.infer<typeof createQuoteRequestSchema>;
 type CreateSupplierQuoteInput = z.infer<typeof createSupplierQuoteSchema>;
 type ListQuoteRequestsQuery = z.infer<typeof listQuoteRequestsQuerySchema>;
+type QuoteRequestDraftInput = z.infer<typeof quoteRequestDraftSchema>;
 
 type RequestItemForAnalysis = {
   id: string;
@@ -191,6 +197,19 @@ function mapSupplierQuote(quote: any) {
   };
 }
 
+function mapQuoteRequestDraft(draft: any) {
+  if (!draft) {
+    return null;
+  }
+
+  return {
+    id: draft.id,
+    payload: draft.payload,
+    createdAt: draft.createdAt,
+    updatedAt: draft.updatedAt,
+  };
+}
+
 async function nextQuoteRequestNumber(tx: any) {
   const year = new Date().getFullYear();
   const start = new Date(Date.UTC(year, 0, 1));
@@ -289,6 +308,34 @@ export async function getQuoteRequest(organizationId: string, id: string) {
   return mapQuoteRequest(await ensureQuoteRequest(organizationId, id));
 }
 
+export async function getQuoteRequestDraft(organizationId: string, userId: string) {
+  const draft = await prisma.quoteRequestDraft.findUnique({
+    where: { organizationId_userId: { organizationId, userId } },
+  });
+
+  return mapQuoteRequestDraft(draft);
+}
+
+export async function saveQuoteRequestDraft(organizationId: string, userId: string, input: QuoteRequestDraftInput) {
+  const draft = await prisma.quoteRequestDraft.upsert({
+    where: { organizationId_userId: { organizationId, userId } },
+    update: { payload: input },
+    create: {
+      organizationId,
+      userId,
+      payload: input,
+    },
+  });
+
+  return mapQuoteRequestDraft(draft);
+}
+
+export async function deleteQuoteRequestDraft(organizationId: string, userId: string) {
+  await prisma.quoteRequestDraft.deleteMany({
+    where: { organizationId, userId },
+  });
+}
+
 export async function createQuoteRequest(
   organizationId: string,
   requesterId: string | null,
@@ -347,6 +394,10 @@ export async function createQuoteRequest(
       include: quoteRequestInclude,
     });
   });
+
+  if (requesterId) {
+    await deleteQuoteRequestDraft(organizationId, requesterId);
+  }
 
   return mapQuoteRequest(request);
 }

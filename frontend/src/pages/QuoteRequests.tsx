@@ -30,17 +30,24 @@ import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { useAuth } from "../contexts/AuthContext";
 import {
+  createUnitRequest,
   createQuoteRequestRequest,
+  deleteQuoteRequestDraftRequest,
   generateQuoteRequestEmailRequest,
   getQuoteRequestRequest,
+  getQuoteRequestDraftRequest,
   listCatalogItemsRequest,
   listQuoteRequestsRequest,
   listSuppliersRequest,
+  listUnitsRequest,
+  saveQuoteRequestDraftRequest,
   type CatalogItem,
   type QuoteRequest,
+  type QuoteRequestDraftPayload,
   type QuoteRequestPayload,
   type QuoteRequestStatus,
   type Supplier,
+  type UnitOfMeasure,
 } from "../services/api";
 
 type ViewMode = "create" | "list" | "detail";
@@ -61,19 +68,6 @@ const emptyLine: RequestLineForm = {
   unit: "unidad",
   technicalSpecs: "",
 };
-
-type QuoteRequestDraft = {
-  updatedAt: string;
-  project: string;
-  costCenter: string;
-  requesterName: string;
-  deadline: string;
-  observations: string;
-  selectedSupplierIds: string[];
-  lines: RequestLineForm[];
-};
-
-const QUOTE_REQUEST_DRAFT_KEY = "smart_source_quote_request_draft_v1";
 
 const statusLabels: Record<QuoteRequestStatus, string> = {
   BORRADOR: "Borrador",
@@ -104,51 +98,11 @@ function normalizeDraftLine(line: Partial<RequestLineForm>): RequestLineForm {
   };
 }
 
-function readQuoteRequestDraft(): QuoteRequestDraft | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const rawDraft = window.localStorage.getItem(QUOTE_REQUEST_DRAFT_KEY);
-    if (!rawDraft) {
-      return null;
-    }
-
-    const draft = JSON.parse(rawDraft) as Partial<QuoteRequestDraft>;
-    return {
-      updatedAt: draft.updatedAt ?? new Date().toISOString(),
-      project: draft.project ?? "",
-      costCenter: draft.costCenter ?? "",
-      requesterName: draft.requesterName ?? "",
-      deadline: draft.deadline ?? "",
-      observations: draft.observations ?? "",
-      selectedSupplierIds: draft.selectedSupplierIds ?? [],
-      lines: draft.lines?.length ? draft.lines.map(normalizeDraftLine) : [{ ...emptyLine }],
-    };
-  } catch {
-    window.localStorage.removeItem(QUOTE_REQUEST_DRAFT_KEY);
-    return null;
-  }
-}
-
-function writeQuoteRequestDraft(draft: QuoteRequestDraft) {
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(QUOTE_REQUEST_DRAFT_KEY, JSON.stringify(draft));
-  }
-}
-
-function clearQuoteRequestDraft() {
-  if (typeof window !== "undefined") {
-    window.localStorage.removeItem(QUOTE_REQUEST_DRAFT_KEY);
-  }
-}
-
 function resolveLineDescription(line: RequestLineForm) {
   return (line.description || line.catalogSearch).trim();
 }
 
-function hasDraftContent(draft: Omit<QuoteRequestDraft, "updatedAt">) {
+function hasDraftContent(draft: QuoteRequestDraftPayload) {
   return Boolean(
     draft.project.trim() ||
       draft.costCenter.trim() ||
@@ -179,24 +133,62 @@ export function QuoteRequests() {
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
 
+  const draftQuery = useQuery({
+    queryKey: ["quote-request-draft"],
+    queryFn: () => getQuoteRequestDraftRequest(token!),
+    enabled: Boolean(token),
+  });
+
+  const unitsQuery = useQuery({
+    queryKey: ["units"],
+    queryFn: () => listUnitsRequest(token!),
+    enabled: Boolean(token),
+  });
+
+  const saveDraftMutation = useMutation({
+    mutationFn: (payload: QuoteRequestDraftPayload) => saveQuoteRequestDraftRequest(token!, payload),
+    onSuccess: ({ draft }) => setDraftUpdatedAt(draft.updatedAt),
+  });
+
+  const deleteDraftMutation = useMutation({
+    mutationFn: () => deleteQuoteRequestDraftRequest(token!),
+    onSuccess: () => {
+      setDraftUpdatedAt(null);
+      queryClient.setQueryData(["quote-request-draft"], { draft: null });
+    },
+  });
+
+  const createUnitMutation = useMutation({
+    mutationFn: ({ name }: { index: number; name: string }) => createUnitRequest(token!, { name }),
+    onSuccess: async ({ unit }, variables) => {
+      updateLine(variables.index, "unit", unit.name);
+      await queryClient.invalidateQueries({ queryKey: ["units"] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos agregar la unidad."),
+  });
+
   useEffect(() => {
-    const draft = readQuoteRequestDraft();
+    if (draftHydrated || draftQuery.isLoading) {
+      return;
+    }
+
+    const draft = draftQuery.data?.draft;
 
     if (draft) {
-      setProject(draft.project);
-      setCostCenter(draft.costCenter);
-      setRequesterName(draft.requesterName);
-      setDeadline(draft.deadline);
-      setObservations(draft.observations);
-      setLines(draft.lines);
-      setSelectedSupplierIds(draft.selectedSupplierIds);
+      setProject(draft.payload.project);
+      setCostCenter(draft.payload.costCenter);
+      setRequesterName(draft.payload.requesterName);
+      setDeadline(draft.payload.deadline);
+      setObservations(draft.payload.observations);
+      setLines(draft.payload.lines?.length ? draft.payload.lines.map(normalizeDraftLine) : [{ ...emptyLine }]);
+      setSelectedSupplierIds(draft.payload.selectedSupplierIds ?? []);
       setDraftUpdatedAt(draft.updatedAt);
-      setRequesterPrefilled(Boolean(draft.requesterName));
-      setNotice("Borrador restaurado automaticamente.");
+      setRequesterPrefilled(Boolean(draft.payload.requesterName));
+      setNotice("Borrador restaurado desde la base de datos.");
     }
 
     setDraftHydrated(true);
-  }, []);
+  }, [draftHydrated, draftQuery.data?.draft, draftQuery.isLoading]);
 
   useEffect(() => {
     if (!draftHydrated || requesterPrefilled || requesterName.trim() || !user?.name) {
@@ -212,7 +204,7 @@ export function QuoteRequests() {
       return;
     }
 
-    const draftWithoutDate = {
+    const draftPayload: QuoteRequestDraftPayload = {
       project,
       costCenter,
       requesterName,
@@ -222,16 +214,21 @@ export function QuoteRequests() {
       lines,
     };
 
-    if (!hasDraftContent(draftWithoutDate)) {
-      clearQuoteRequestDraft();
-      setDraftUpdatedAt(null);
-      return;
-    }
+    const timeout = window.setTimeout(() => {
+      if (!hasDraftContent(draftPayload)) {
+        if (draftUpdatedAt) {
+          deleteDraftMutation.mutate();
+        } else {
+          setDraftUpdatedAt(null);
+        }
+        return;
+      }
 
-    const updatedAt = new Date().toISOString();
-    writeQuoteRequestDraft({ ...draftWithoutDate, updatedAt });
-    setDraftUpdatedAt(updatedAt);
-  }, [costCenter, deadline, draftHydrated, lines, observations, project, requesterName, selectedSupplierIds]);
+      saveDraftMutation.mutate(draftPayload);
+    }, 700);
+
+    return () => window.clearTimeout(timeout);
+  }, [costCenter, deadline, draftHydrated, draftUpdatedAt, lines, observations, project, requesterName, selectedSupplierIds]);
 
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "quote-requests"],
@@ -258,6 +255,7 @@ export function QuoteRequests() {
   const requests = useMemo(() => requestsQuery.data?.requests ?? [], [requestsQuery.data?.requests]);
   const suppliers = useMemo(() => suppliersQuery.data?.suppliers ?? [], [suppliersQuery.data?.suppliers]);
   const catalogItems = useMemo(() => catalogItemsQuery.data?.items ?? [], [catalogItemsQuery.data?.items]);
+  const units = useMemo(() => unitsQuery.data?.units ?? [], [unitsQuery.data?.units]);
   const selectedRequestFromList = requests.find((request) => request.id === selectedRequestId) ?? null;
 
   const requestDetailQuery = useQuery({
@@ -282,7 +280,7 @@ export function QuoteRequests() {
     mutationFn: ({ payload, files }: { payload: QuoteRequestPayload; files: File[] }) =>
       createQuoteRequestRequest(token!, payload, files),
     onSuccess: async ({ request }) => {
-      clearQuoteRequestDraft();
+      deleteDraftMutation.mutate();
       setDraftUpdatedAt(null);
       setNotice(`Solicitud ${request.number} creada correctamente.`);
       setProject("");
@@ -365,7 +363,7 @@ export function QuoteRequests() {
   }
 
   function discardDraft() {
-    clearQuoteRequestDraft();
+    deleteDraftMutation.mutate();
     setDraftUpdatedAt(null);
     setProject("");
     setCostCenter("");
@@ -459,6 +457,7 @@ export function QuoteRequests() {
           suppliers={suppliers}
           selectedSupplierIds={selectedSupplierIds}
           catalogItems={catalogItems}
+          units={units}
           project={project}
           costCenter={costCenter}
           requesterName={requesterName}
@@ -470,6 +469,8 @@ export function QuoteRequests() {
           isPending={createMutation.isPending}
           isLoadingSuppliers={suppliersQuery.isLoading}
           isLoadingCatalog={catalogItemsQuery.isLoading}
+          isLoadingUnits={unitsQuery.isLoading}
+          isCreatingUnit={createUnitMutation.isPending}
           draftUpdatedAt={draftUpdatedAt}
           onProjectChange={setProject}
           onCostCenterChange={setCostCenter}
@@ -478,6 +479,7 @@ export function QuoteRequests() {
           onObservationsChange={setObservations}
           onUpdateLine={updateLine}
           onSelectCatalogItem={selectCatalogItem}
+          onCreateUnit={(index, name) => createUnitMutation.mutate({ index, name })}
           onAddLine={addLine}
           onRemoveLine={removeLine}
           onAddAttachments={addAttachments}
@@ -519,6 +521,7 @@ function CreateQuoteRequestPanel({
   suppliers,
   selectedSupplierIds,
   catalogItems,
+  units,
   project,
   costCenter,
   requesterName,
@@ -530,6 +533,8 @@ function CreateQuoteRequestPanel({
   isPending,
   isLoadingSuppliers,
   isLoadingCatalog,
+  isLoadingUnits,
+  isCreatingUnit,
   draftUpdatedAt,
   onProjectChange,
   onCostCenterChange,
@@ -538,6 +543,7 @@ function CreateQuoteRequestPanel({
   onObservationsChange,
   onUpdateLine,
   onSelectCatalogItem,
+  onCreateUnit,
   onAddLine,
   onRemoveLine,
   onAddAttachments,
@@ -549,6 +555,7 @@ function CreateQuoteRequestPanel({
   suppliers: Supplier[];
   selectedSupplierIds: string[];
   catalogItems: CatalogItem[];
+  units: UnitOfMeasure[];
   project: string;
   costCenter: string;
   requesterName: string;
@@ -560,6 +567,8 @@ function CreateQuoteRequestPanel({
   isPending: boolean;
   isLoadingSuppliers: boolean;
   isLoadingCatalog: boolean;
+  isLoadingUnits: boolean;
+  isCreatingUnit: boolean;
   draftUpdatedAt: string | null;
   onProjectChange: (value: string) => void;
   onCostCenterChange: (value: string) => void;
@@ -568,6 +577,7 @@ function CreateQuoteRequestPanel({
   onObservationsChange: (value: string) => void;
   onUpdateLine: (index: number, key: keyof RequestLineForm, value: string) => void;
   onSelectCatalogItem: (index: number, item: CatalogItem) => void;
+  onCreateUnit: (index: number, name: string) => void;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onAddAttachments: (files: FileList | null) => void;
@@ -663,9 +673,13 @@ function CreateQuoteRequestPanel({
               index={index}
               line={line}
               catalogItems={catalogItems}
+              units={units}
               isLoadingCatalog={isLoadingCatalog}
+              isLoadingUnits={isLoadingUnits}
+              isCreatingUnit={isCreatingUnit}
               onUpdate={onUpdateLine}
               onSelectCatalogItem={onSelectCatalogItem}
+              onCreateUnit={onCreateUnit}
               onRemove={onRemoveLine}
             />
           ))}
@@ -1117,29 +1131,46 @@ function RequestLineEditor({
   index,
   line,
   catalogItems,
+  units,
   isLoadingCatalog,
+  isLoadingUnits,
+  isCreatingUnit,
   onUpdate,
   onSelectCatalogItem,
+  onCreateUnit,
   onRemove,
 }: {
   index: number;
   line: RequestLineForm;
   catalogItems: CatalogItem[];
+  units: UnitOfMeasure[];
   isLoadingCatalog: boolean;
+  isLoadingUnits: boolean;
+  isCreatingUnit: boolean;
   onUpdate: (index: number, key: keyof RequestLineForm, value: string) => void;
   onSelectCatalogItem: (index: number, item: CatalogItem) => void;
+  onCreateUnit: (index: number, name: string) => void;
   onRemove: (index: number) => void;
 }) {
+  const [isAddingUnit, setIsAddingUnit] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
   const selectedCatalogItem = line.catalogItemId ? catalogItems.find((item) => item.id === line.catalogItemId) : null;
   const catalogQuery = (line.catalogSearch || line.description).trim();
   const catalogMatches = useMemo(() => {
     const words = catalogQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const prioritizedItems = [...catalogItems].sort((left, right) => {
+      if (right.supplierCount !== left.supplierCount) {
+        return right.supplierCount - left.supplierCount;
+      }
+
+      return left.name.localeCompare(right.name, "es");
+    });
 
     if (!words.length) {
-      return catalogItems.slice(0, 4);
+      return prioritizedItems.slice(0, 4);
     }
 
-    return catalogItems
+    return prioritizedItems
       .filter((item) => {
         const searchable = [
           item.name,
@@ -1157,6 +1188,24 @@ function RequestLineEditor({
       })
       .slice(0, 6);
   }, [catalogItems, catalogQuery]);
+  const unitOptions = useMemo(() => {
+    const options = new Map<string, UnitOfMeasure>();
+
+    units.forEach((unit) => options.set(unit.name, unit));
+
+    if (line.unit && !options.has(line.unit)) {
+      options.set(line.unit, {
+        id: `line_${line.unit}`,
+        name: line.unit,
+        abbreviation: null,
+        isActive: true,
+        createdAt: "",
+        updatedAt: "",
+      });
+    }
+
+    return Array.from(options.values()).sort((left, right) => left.name.localeCompare(right.name, "es"));
+  }, [line.unit, units]);
   const catalogUrl = `/catalog?from=quote-request&name=${encodeURIComponent(catalogQuery)}`;
 
   function handleCatalogSearch(value: string) {
@@ -1166,6 +1215,18 @@ function RequestLineEditor({
       onUpdate(index, "catalogItemId", "");
       onUpdate(index, "description", "");
     }
+  }
+
+  function submitNewUnit() {
+    const name = newUnitName.trim();
+
+    if (!name) {
+      return;
+    }
+
+    onCreateUnit(index, name);
+    setNewUnitName("");
+    setIsAddingUnit(false);
   }
 
   return (
@@ -1253,7 +1314,44 @@ function RequestLineEditor({
       </label>
       <label className="block">
         <span className="mb-1.5 block text-xs font-semibold text-slate-500">Unidad</span>
-        <Input value={line.unit} onChange={(event) => onUpdate(index, "unit", event.target.value)} />
+        <select
+          className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+          value={line.unit}
+          onChange={(event) => onUpdate(index, "unit", event.target.value)}
+          disabled={isLoadingUnits}
+        >
+          <option value="">{isLoadingUnits ? "Cargando..." : "Seleccionar"}</option>
+          {unitOptions.map((unit) => (
+            <option key={unit.id} value={unit.name}>
+              {unit.name}{unit.abbreviation ? ` (${unit.abbreviation})` : ""}
+            </option>
+          ))}
+        </select>
+        {isAddingUnit ? (
+          <div className="mt-2 rounded-lg border border-border bg-white p-2">
+            <Input
+              value={newUnitName}
+              onChange={(event) => setNewUnitName(event.target.value)}
+              placeholder="Nueva unidad"
+            />
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <Button type="button" size="sm" disabled={isCreatingUnit} onClick={submitNewUnit}>
+                Guardar
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddingUnit(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-1.5 text-[11px] font-bold text-brand-700 hover:text-brand-900"
+            onClick={() => setIsAddingUnit(true)}
+          >
+            + Agregar unidad
+          </button>
+        )}
       </label>
       <Button type="button" variant="outline" size="icon" title="Quitar línea" onClick={() => onRemove(index)}>
         <Trash2 className="h-4 w-4 text-red-600" />

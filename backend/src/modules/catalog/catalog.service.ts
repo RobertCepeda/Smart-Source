@@ -1,15 +1,40 @@
 import { prisma } from "../../lib/prisma";
-import type { createItemSchema, createNamedEntitySchema, listItemsQuerySchema, updateItemSchema } from "./catalog.schema";
+import type { createItemSchema, createNamedEntitySchema, createUnitSchema, listItemsQuerySchema, updateItemSchema } from "./catalog.schema";
 import type { z } from "zod";
 
 type ListItemsQuery = z.infer<typeof listItemsQuerySchema>;
 type CreateItemInput = z.infer<typeof createItemSchema>;
 type UpdateItemInput = z.infer<typeof updateItemSchema>;
 type NamedEntityInput = z.infer<typeof createNamedEntitySchema>;
+type CreateUnitInput = z.infer<typeof createUnitSchema>;
 
 function cleanString(value?: string | null) {
   const cleaned = value?.trim();
   return cleaned ? cleaned : undefined;
+}
+
+function normalizeUnit(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+async function ensureUnit(organizationId: string, name?: string | null, abbreviation?: string | null) {
+  const unitName = cleanString(name);
+  if (!unitName) {
+    return null;
+  }
+
+  return prisma.unitOfMeasure.upsert({
+    where: { organizationId_name: { organizationId, name: normalizeUnit(unitName) } },
+    update: {
+      abbreviation: cleanString(abbreviation),
+      isActive: true,
+    },
+    create: {
+      organizationId,
+      name: normalizeUnit(unitName),
+      abbreviation: cleanString(abbreviation),
+    },
+  });
 }
 
 function mapItem(item: any) {
@@ -222,6 +247,8 @@ export async function getItemDetail(organizationId: string, id: string) {
 }
 
 export async function createItem(organizationId: string, input: CreateItemInput) {
+  await ensureUnit(organizationId, input.unit);
+
   const item = await prisma.item.create({
     data: {
       organizationId,
@@ -240,6 +267,7 @@ export async function createItem(organizationId: string, input: CreateItemInput)
 
 export async function updateItem(organizationId: string, id: string, input: UpdateItemInput) {
   await ensureItem(organizationId, id);
+  await ensureUnit(organizationId, input.unit);
 
   const item = await prisma.item.update({
     where: { id },
@@ -290,6 +318,46 @@ export async function createBrand(organizationId: string, input: NamedEntityInpu
     update: {},
     create: { organizationId, name: input.name.trim() },
   });
+}
+
+export async function listUnits(organizationId: string) {
+  const [units, itemUnits, requestItemUnits] = await Promise.all([
+    prisma.unitOfMeasure.findMany({
+      where: { organizationId, isActive: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.item.findMany({
+      where: { organizationId, isActive: true, unit: { not: null } },
+      select: { unit: true },
+      distinct: ["unit"],
+    }),
+    prisma.quoteRequestItem.findMany({
+      where: { quoteRequest: { organizationId } },
+      select: { unit: true },
+      distinct: ["unit"],
+    }),
+  ]);
+
+  const knownNames = new Set(units.map((unit) => normalizeUnit(unit.name)));
+  const inferredUnits = [...itemUnits, ...requestItemUnits]
+    .map((entry) => cleanString(entry.unit))
+    .filter((unit): unit is string => Boolean(unit))
+    .filter((unit) => !knownNames.has(normalizeUnit(unit)))
+    .map((unit) => ({
+      id: `inferred_${normalizeUnit(unit).replace(/[^a-z0-9]+/g, "_")}`,
+      organizationId,
+      name: normalizeUnit(unit),
+      abbreviation: null,
+      isActive: true,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    }));
+
+  return [...units, ...inferredUnits].sort((left, right) => left.name.localeCompare(right.name, "es"));
+}
+
+export async function createUnit(organizationId: string, input: CreateUnitInput) {
+  return ensureUnit(organizationId, input.name, input.abbreviation);
 }
 
 export async function listTags() {

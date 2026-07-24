@@ -27,3 +27,8 @@ export const updateItemSchema = createItemSchema.partial();
 export const createNamedEntitySchema = z.object({
   name: z.string().trim().min(2, "El nombre es obligatorio"),
 });
+
+export const createUnitSchema = z.object({
+  name: z.string().trim().min(1, "La unidad es obligatoria").max(40),
+  abbreviation: z.string().trim().max(16).optional(),
+});
