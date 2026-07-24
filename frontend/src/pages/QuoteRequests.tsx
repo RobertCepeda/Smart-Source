@@ -326,8 +326,8 @@ export function QuoteRequests() {
 
   function selectCatalogItem(index: number, item: CatalogItem) {
     setNotice(null);
-    setLines((current) =>
-      current.map((line, lineIndex) =>
+    setLines((current) => {
+      const updatedLines = current.map((line, lineIndex) =>
         lineIndex === index
           ? {
               ...line,
@@ -338,8 +338,12 @@ export function QuoteRequests() {
               technicalSpecs: item.description || line.technicalSpecs,
             }
           : line,
-      ),
-    );
+      );
+      const hasOpenPicker = updatedLines.some((line, lineIndex) => lineIndex !== index && !line.catalogItemId && !line.description.trim());
+      const shouldAppendPicker = index === current.length - 1 && !hasOpenPicker;
+
+      return shouldAppendPicker ? [...updatedLines, { ...emptyLine }] : updatedLines;
+    });
   }
 
   function addLine() {
@@ -586,6 +590,8 @@ function CreateQuoteRequestPanel({
   onDiscardDraft: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
+  const hasOpenMaterialPicker = lines.some((line) => !line.catalogItemId && !line.description.trim());
+
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
       {draftUpdatedAt ? (
@@ -661,7 +667,7 @@ function CreateQuoteRequestPanel({
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <h2 className="text-base font-bold text-ink">Materiales, equipos o servicios</h2>
-          <Button type="button" variant="outline" size="sm" onClick={onAddLine}>
+          <Button type="button" variant="outline" size="sm" onClick={onAddLine} disabled={hasOpenMaterialPicker}>
             <Plus className="h-4 w-4" />
             Agregar
           </Button>
@@ -683,6 +689,12 @@ function CreateQuoteRequestPanel({
               onRemove={onRemoveLine}
             />
           ))}
+          <div className="flex justify-end pt-1">
+            <Button type="button" variant="outline" size="sm" onClick={onAddLine} disabled={hasOpenMaterialPicker}>
+              <Plus className="h-4 w-4" />
+              Agregar material abajo
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -1154,8 +1166,11 @@ function RequestLineEditor({
 }) {
   const [isAddingUnit, setIsAddingUnit] = useState(false);
   const [newUnitName, setNewUnitName] = useState("");
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const selectedCatalogItem = line.catalogItemId ? catalogItems.find((item) => item.id === line.catalogItemId) : null;
   const catalogQuery = (line.catalogSearch || line.description).trim();
+  const hasSelectedMaterial = Boolean(line.catalogItemId || line.description.trim());
+  const materialName = line.description.trim() || line.catalogSearch.trim();
   const catalogMatches = useMemo(() => {
     const words = catalogQuery.toLowerCase().split(/\s+/).filter(Boolean);
     const prioritizedItems = [...catalogItems].sort((left, right) => {
@@ -1227,6 +1242,121 @@ function RequestLineEditor({
     onCreateUnit(index, name);
     setNewUnitName("");
     setIsAddingUnit(false);
+  }
+
+  function clearMaterialSelection() {
+    onUpdate(index, "catalogItemId", "");
+    onUpdate(index, "description", "");
+    onUpdate(index, "catalogSearch", "");
+    setIsDetailsOpen(false);
+  }
+
+  const compactUnitControl = (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-semibold text-slate-500">Unidad</span>
+      <select
+        className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+        value={line.unit}
+        onChange={(event) => onUpdate(index, "unit", event.target.value)}
+        disabled={isLoadingUnits}
+      >
+        <option value="">{isLoadingUnits ? "Cargando..." : "Seleccionar"}</option>
+        {unitOptions.map((unit) => (
+          <option key={unit.id} value={unit.name}>
+            {unit.name}
+            {unit.abbreviation ? ` (${unit.abbreviation})` : ""}
+          </option>
+        ))}
+      </select>
+      {isAddingUnit ? (
+        <div className="mt-2 rounded-lg border border-border bg-white p-2">
+          <Input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Nueva unidad" />
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            <Button type="button" size="sm" disabled={isCreatingUnit} onClick={submitNewUnit}>
+              Guardar
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddingUnit(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="mt-1.5 text-[11px] font-bold text-brand-700 hover:text-brand-900" onClick={() => setIsAddingUnit(true)}>
+          + Agregar unidad
+        </button>
+      )}
+    </label>
+  );
+
+  if (hasSelectedMaterial) {
+    return (
+      <div className="rounded-lg border border-border bg-white">
+        <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-bold text-ink">
+              {index + 1}. {materialName}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsDetailsOpen((current) => !current)}>
+              <Eye className="h-4 w-4" />
+              {isDetailsOpen ? "Ocultar" : "Ver detalles"}
+            </Button>
+            <Button type="button" variant="outline" size="icon" title="Quitar material" onClick={() => onRemove(index)}>
+              <Trash2 className="h-4 w-4 text-red-600" />
+            </Button>
+          </div>
+        </div>
+
+        {isDetailsOpen ? (
+          <div className="border-t border-border bg-slate-50/70 p-3">
+            {selectedCatalogItem ? (
+              <div className="mb-3 grid gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-border bg-white px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Categoría</p>
+                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.category?.name ?? "Sin categoría"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-white px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Marca</p>
+                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.brand?.name ?? "Sin marca"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-white px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipo</p>
+                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.type === "MATERIAL" ? "Material" : "Servicio"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-white px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Suplidores</p>
+                  <p className="mt-1 truncate text-xs font-bold text-ink">{selectedCatalogItem.supplierCount || 0} asociados</p>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-[110px_180px_1fr]">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-500">Cantidad</span>
+                <Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
+              </label>
+              {compactUnitControl}
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-500">Especificaciones</span>
+                <textarea
+                  className="min-h-20 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  value={line.technicalSpecs}
+                  onChange={(event) => onUpdate(index, "technicalSpecs", event.target.value)}
+                  placeholder="Especificaciones técnicas, marca sugerida, norma o detalle."
+                />
+              </label>
+            </div>
+
+            <div className="mt-3 flex justify-end">
+              <Button type="button" variant="ghost" size="sm" onClick={clearMaterialSelection}>
+                Cambiar material
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   return (
