@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -102,28 +102,6 @@ function resolveLineDescription(line: RequestLineForm) {
   return (line.description || line.catalogSearch).trim();
 }
 
-function isMaterialPickerLine(line: RequestLineForm) {
-  return !line.catalogItemId && !line.description.trim();
-}
-
-function ensureMaterialPicker(lines: RequestLineForm[]) {
-  let hasPicker = false;
-  const cleanLines = lines.filter((line) => {
-    if (!isMaterialPickerLine(line)) {
-      return true;
-    }
-
-    if (hasPicker) {
-      return false;
-    }
-
-    hasPicker = true;
-    return true;
-  });
-
-  return hasPicker ? cleanLines : [...cleanLines, { ...emptyLine }];
-}
-
 function hasDraftContent(draft: QuoteRequestDraftPayload) {
   return Boolean(
     draft.project.trim() ||
@@ -146,7 +124,7 @@ export function QuoteRequests() {
   const [requesterPrefilled, setRequesterPrefilled] = useState(false);
   const [deadline, setDeadline] = useState("");
   const [observations, setObservations] = useState("");
-  const [lines, setLines] = useState<RequestLineForm[]>([{ ...emptyLine }]);
+  const [lines, setLines] = useState<RequestLineForm[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<QuoteRequestStatus | "">("");
@@ -154,6 +132,9 @@ export function QuoteRequests() {
   const [notice, setNotice] = useState<string | null>(null);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
+  const [draftWasRestored, setDraftWasRestored] = useState(false);
+  const draftUpdatedAtRef = useRef<string | null>(null);
+  const latestDraftRef = useRef<QuoteRequestDraftPayload | null>(null);
 
   const draftQuery = useQuery({
     queryKey: ["quote-request-draft"],
@@ -169,28 +150,32 @@ export function QuoteRequests() {
 
   const saveDraftMutation = useMutation({
     mutationFn: (payload: QuoteRequestDraftPayload) => saveQuoteRequestDraftRequest(token!, payload),
-    onSuccess: ({ draft }) => setDraftUpdatedAt(draft.updatedAt),
+    onSuccess: ({ draft }) => {
+      draftUpdatedAtRef.current = draft.updatedAt;
+      setDraftUpdatedAt(draft.updatedAt);
+      queryClient.setQueryData(["quote-request-draft"], { draft });
+    },
   });
 
   const deleteDraftMutation = useMutation({
     mutationFn: () => deleteQuoteRequestDraftRequest(token!),
     onSuccess: () => {
+      draftUpdatedAtRef.current = null;
       setDraftUpdatedAt(null);
       queryClient.setQueryData(["quote-request-draft"], { draft: null });
     },
   });
 
   const createUnitMutation = useMutation({
-    mutationFn: ({ name }: { index: number; name: string }) => createUnitRequest(token!, { name }),
-    onSuccess: async ({ unit }, variables) => {
-      updateLine(variables.index, "unit", unit.name);
+    mutationFn: (name: string) => createUnitRequest(token!, { name }),
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["units"] });
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos agregar la unidad."),
   });
 
   useEffect(() => {
-    if (draftHydrated || draftQuery.isLoading) {
+    if (draftHydrated || draftQuery.isLoading || draftQuery.isFetching) {
       return;
     }
 
@@ -202,15 +187,21 @@ export function QuoteRequests() {
       setRequesterName(draft.payload.requesterName);
       setDeadline(draft.payload.deadline);
       setObservations(draft.payload.observations);
-      setLines(ensureMaterialPicker(draft.payload.lines?.length ? draft.payload.lines.map(normalizeDraftLine) : [{ ...emptyLine }]));
+      setLines(
+        (draft.payload.lines ?? [])
+          .map(normalizeDraftLine)
+          .filter((line: RequestLineForm) => resolveLineDescription(line)),
+      );
       setSelectedSupplierIds(draft.payload.selectedSupplierIds ?? []);
+      draftUpdatedAtRef.current = draft.updatedAt;
       setDraftUpdatedAt(draft.updatedAt);
+      setDraftWasRestored(true);
       setRequesterPrefilled(Boolean(draft.payload.requesterName));
       setNotice("Borrador restaurado desde la base de datos.");
     }
 
     setDraftHydrated(true);
-  }, [draftHydrated, draftQuery.data?.draft, draftQuery.isLoading]);
+  }, [draftHydrated, draftQuery.data?.draft, draftQuery.isFetching, draftQuery.isLoading]);
 
   useEffect(() => {
     if (!draftHydrated || requesterPrefilled || requesterName.trim() || !user?.name) {
@@ -235,10 +226,11 @@ export function QuoteRequests() {
       selectedSupplierIds,
       lines,
     };
+    latestDraftRef.current = draftPayload;
 
     const timeout = window.setTimeout(() => {
       if (!hasDraftContent(draftPayload)) {
-        if (draftUpdatedAt) {
+        if (draftUpdatedAtRef.current) {
           deleteDraftMutation.mutate();
         } else {
           setDraftUpdatedAt(null);
@@ -247,10 +239,21 @@ export function QuoteRequests() {
       }
 
       saveDraftMutation.mutate(draftPayload);
-    }, 700);
+    }, 300);
 
     return () => window.clearTimeout(timeout);
-  }, [costCenter, deadline, draftHydrated, draftUpdatedAt, lines, observations, project, requesterName, selectedSupplierIds]);
+  }, [costCenter, deadline, draftHydrated, lines, observations, project, requesterName, selectedSupplierIds]);
+
+  useEffect(
+    () => () => {
+      const draft = latestDraftRef.current;
+
+      if (token && draft && hasDraftContent(draft)) {
+        void saveQuoteRequestDraftRequest(token, draft);
+      }
+    },
+    [token],
+  );
 
   const suppliersQuery = useQuery({
     queryKey: ["suppliers", "quote-requests"],
@@ -303,13 +306,16 @@ export function QuoteRequests() {
       createQuoteRequestRequest(token!, payload, files),
     onSuccess: async ({ request }) => {
       deleteDraftMutation.mutate();
+      draftUpdatedAtRef.current = null;
+      latestDraftRef.current = null;
       setDraftUpdatedAt(null);
+      setDraftWasRestored(false);
       setNotice(`Solicitud ${request.number} creada correctamente.`);
       setProject("");
       setCostCenter("");
       setDeadline("");
       setObservations("");
-      setLines([{ ...emptyLine }]);
+      setLines([]);
       setAttachments([]);
       setSelectedSupplierIds([]);
       setSelectedRequestId(request.id);
@@ -341,59 +347,38 @@ export function QuoteRequests() {
     setNotice(null);
   }
 
-  function updateLine(index: number, key: keyof RequestLineForm, value: string) {
-    setNotice(null);
-    setLines((current) => current.map((line, lineIndex) => (lineIndex === index ? { ...line, [key]: value } : line)));
-  }
+  function addLine(line: RequestLineForm) {
+    const isDuplicate = Boolean(line.catalogItemId && lines.some((entry) => entry.catalogItemId === line.catalogItemId));
 
-  function selectCatalogItem(index: number, item: CatalogItem) {
-    setNotice(null);
-    setLines((current) => {
-      const updatedLines = current.map((line, lineIndex) =>
-        lineIndex === index
-          ? {
-              ...line,
-              catalogItemId: item.id,
-              catalogSearch: item.name,
-              description: item.name,
-              unit: item.unit || line.unit || "unidad",
-              technicalSpecs: item.description || line.technicalSpecs,
-            }
-          : line,
-      );
-      const hasOpenPicker = updatedLines.some((line, lineIndex) => lineIndex !== index && isMaterialPickerLine(line));
-      const shouldAppendPicker = !hasOpenPicker;
+    if (isDuplicate) {
+      setNotice("Ese material ya está agregado. Ábrelo desde la lista para editarlo.");
+      return false;
+    }
 
-      return ensureMaterialPicker(shouldAppendPicker ? [...updatedLines, { ...emptyLine }] : updatedLines);
-    });
+    setLines((current) => [...current, { ...line }]);
+    setNotice(`${resolveLineDescription(line)} fue agregado a la solicitud.`);
+    return true;
   }
 
   function removeLine(index: number) {
-    setLines((current) => {
-      const nextLines = current.filter((_, lineIndex) => lineIndex !== index);
-
-      return ensureMaterialPicker(nextLines.length ? nextLines : [{ ...emptyLine }]);
-    });
+    setLines((current) => current.filter((_, lineIndex) => lineIndex !== index));
+    setNotice(null);
   }
 
-  function editLineMaterial(index: number) {
-    setNotice(null);
-    setLines((current) =>
-      ensureMaterialPicker(
-        current
-          .map((line, lineIndex) =>
-            lineIndex === index
-              ? {
-                  ...line,
-                  catalogItemId: "",
-                  catalogSearch: "",
-                  description: "",
-                }
-              : line,
-          )
-          .filter((line, lineIndex) => lineIndex === index || line.catalogItemId || line.description.trim()),
-      ),
+  function replaceLine(index: number, line: RequestLineForm) {
+    const isDuplicate = Boolean(
+      line.catalogItemId &&
+        lines.some((entry, lineIndex) => lineIndex !== index && entry.catalogItemId === line.catalogItemId),
     );
+
+    if (isDuplicate) {
+      setNotice("Ese material ya está en la solicitud. Edita la fila existente.");
+      return false;
+    }
+
+    setLines((current) => current.map((entry, lineIndex) => (lineIndex === index ? { ...line } : entry)));
+    setNotice(`Cambios guardados en ${resolveLineDescription(line)}.`);
+    return true;
   }
 
   function addAttachments(fileList: FileList | null) {
@@ -410,16 +395,19 @@ export function QuoteRequests() {
 
   function discardDraft() {
     deleteDraftMutation.mutate();
+    draftUpdatedAtRef.current = null;
+    latestDraftRef.current = null;
     setDraftUpdatedAt(null);
     setProject("");
     setCostCenter("");
     setDeadline("");
     setObservations("");
-    setLines([{ ...emptyLine }]);
+    setLines([]);
     setAttachments([]);
     setSelectedSupplierIds([]);
     setRequesterName(user?.name ?? "");
     setRequesterPrefilled(Boolean(user?.name));
+    setDraftWasRestored(false);
     setNotice("Borrador descartado.");
   }
 
@@ -517,16 +505,18 @@ export function QuoteRequests() {
           isLoadingCatalog={catalogItemsQuery.isLoading}
           isLoadingUnits={unitsQuery.isLoading}
           isCreatingUnit={createUnitMutation.isPending}
-          draftUpdatedAt={draftUpdatedAt}
+          restoredDraftAt={draftWasRestored ? draftUpdatedAt : null}
           onProjectChange={setProject}
           onCostCenterChange={setCostCenter}
           onRequesterNameChange={setRequesterName}
           onDeadlineChange={setDeadline}
           onObservationsChange={setObservations}
-          onUpdateLine={updateLine}
-          onSelectCatalogItem={selectCatalogItem}
-          onEditLineMaterial={editLineMaterial}
-          onCreateUnit={(index, name) => createUnitMutation.mutate({ index, name })}
+          onAddLine={addLine}
+          onReplaceLine={replaceLine}
+          onCreateUnit={async (name) => {
+            const result = await createUnitMutation.mutateAsync(name);
+            return result.unit;
+          }}
           onRemoveLine={removeLine}
           onAddAttachments={addAttachments}
           onRemoveAttachment={(index) => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))}
@@ -581,15 +571,14 @@ function CreateQuoteRequestPanel({
   isLoadingCatalog,
   isLoadingUnits,
   isCreatingUnit,
-  draftUpdatedAt,
+  restoredDraftAt,
   onProjectChange,
   onCostCenterChange,
   onRequesterNameChange,
   onDeadlineChange,
   onObservationsChange,
-  onUpdateLine,
-  onSelectCatalogItem,
-  onEditLineMaterial,
+  onAddLine,
+  onReplaceLine,
   onCreateUnit,
   onRemoveLine,
   onAddAttachments,
@@ -615,16 +604,15 @@ function CreateQuoteRequestPanel({
   isLoadingCatalog: boolean;
   isLoadingUnits: boolean;
   isCreatingUnit: boolean;
-  draftUpdatedAt: string | null;
+  restoredDraftAt: string | null;
   onProjectChange: (value: string) => void;
   onCostCenterChange: (value: string) => void;
   onRequesterNameChange: (value: string) => void;
   onDeadlineChange: (value: string) => void;
   onObservationsChange: (value: string) => void;
-  onUpdateLine: (index: number, key: keyof RequestLineForm, value: string) => void;
-  onSelectCatalogItem: (index: number, item: CatalogItem) => void;
-  onEditLineMaterial: (index: number) => void;
-  onCreateUnit: (index: number, name: string) => void;
+  onAddLine: (line: RequestLineForm) => boolean;
+  onReplaceLine: (index: number, line: RequestLineForm) => boolean;
+  onCreateUnit: (name: string) => Promise<UnitOfMeasure>;
   onRemoveLine: (index: number) => void;
   onAddAttachments: (files: FileList | null) => void;
   onRemoveAttachment: (index: number) => void;
@@ -632,16 +620,12 @@ function CreateQuoteRequestPanel({
   onDiscardDraft: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
-  const lineEntries = lines.map((line, index) => ({ line, index }));
-  const pickerLineEntries = lineEntries.filter(({ line }) => isMaterialPickerLine(line));
-  const addedLineEntries = lineEntries.filter(({ line }) => line.catalogItemId || line.description.trim());
-
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
-      {draftUpdatedAt ? (
+      {restoredDraftAt ? (
         <div className="flex flex-col gap-2 rounded-lg border border-brand-100 bg-brand-50/70 px-3 py-2.5 text-[13px] text-brand-800 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            Borrador guardado automaticamente. Ultimo cambio: {formatDateTime(draftUpdatedAt)}
+            Recuperamos tu borrador. Último cambio: {formatDateTime(restoredDraftAt)}
           </span>
           <Button type="button" variant="outline" size="sm" onClick={onDiscardDraft}>
             <Trash2 className="h-4 w-4 text-red-600" />
@@ -713,67 +697,47 @@ function CreateQuoteRequestPanel({
           <h2 className="text-base font-bold text-ink">Materiales, equipos o servicios</h2>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="rounded-lg border border-border bg-slate-50/70 p-3">
-            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-[13px] font-bold text-ink">Agregar material</h3>
-                <p className="text-xs text-slate-500">Busca en el catálogo y selecciona el material que va en la solicitud.</p>
-              </div>
-              <Badge tone="slate">Catálogo</Badge>
-            </div>
-            <div className="space-y-2">
-              {pickerLineEntries.map(({ line, index }) => (
-                <RequestLineEditor
-                  key={`picker-${index}`}
-                  index={index}
-                  line={line}
-                  catalogItems={catalogItems}
-                  units={units}
-                  isLoadingCatalog={isLoadingCatalog}
-                  isLoadingUnits={isLoadingUnits}
-                  isCreatingUnit={isCreatingUnit}
-                  onUpdate={onUpdateLine}
-                  onSelectCatalogItem={onSelectCatalogItem}
-                  onEditMaterial={onEditLineMaterial}
-                  onCreateUnit={onCreateUnit}
-                  onRemove={onRemoveLine}
-                />
-              ))}
-            </div>
-          </div>
+          <MaterialComposer
+            catalogItems={catalogItems}
+            units={units}
+            isLoadingCatalog={isLoadingCatalog}
+            isLoadingUnits={isLoadingUnits}
+            isCreatingUnit={isCreatingUnit}
+            onCreateUnit={onCreateUnit}
+            onAdd={onAddLine}
+          />
 
-          <div className="rounded-lg border border-border bg-white p-2.5">
+          <div className="rounded-lg border border-border bg-white p-3">
             <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-xs font-bold text-ink">Materiales agregados</h3>
-                <p className="text-[11px] text-slate-500">Ítems listos para esta solicitud.</p>
+                <h3 className="text-[13px] font-bold text-ink">Materiales agregados</h3>
+                <p className="text-xs text-slate-500">Pulsa un material para editarlo. La X solo lo elimina.</p>
               </div>
-              <Badge tone={addedLineEntries.length ? "green" : "slate"}>{addedLineEntries.length} agregados</Badge>
+              <Badge tone={lines.length ? "green" : "slate"}>
+                {lines.length} {lines.length === 1 ? "agregado" : "agregados"}
+              </Badge>
             </div>
-            {addedLineEntries.length ? (
-              <div className="space-y-1.5">
-                {addedLineEntries.map(({ line, index }, order) => (
-                  <RequestLineEditor
-                    key={`added-${index}`}
+            {lines.length ? (
+              <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+                {lines.map((line, index) => (
+                  <AddedMaterialRow
+                    key={`${line.catalogItemId || line.description}-${index}`}
                     index={index}
-                    displayOrder={order}
                     line={line}
                     catalogItems={catalogItems}
                     units={units}
                     isLoadingCatalog={isLoadingCatalog}
                     isLoadingUnits={isLoadingUnits}
                     isCreatingUnit={isCreatingUnit}
-                    onUpdate={onUpdateLine}
-                    onSelectCatalogItem={onSelectCatalogItem}
-                    onEditMaterial={onEditLineMaterial}
                     onCreateUnit={onCreateUnit}
+                    onSave={onReplaceLine}
                     onRemove={onRemoveLine}
                   />
                 ))}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-brand-200 bg-white/70 px-3 py-3 text-xs text-slate-500">
-                Todavía no has agregado materiales. Selecciona uno arriba para verlo aquí.
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 px-3 py-4 text-center text-xs text-slate-500">
+                Todavía no has agregado materiales a esta solicitud.
               </div>
             )}
           </div>
@@ -1221,42 +1185,187 @@ function ComparisonTable({ request }: { request: QuoteRequest }) {
   );
 }
 
-function RequestLineEditor({
+function MaterialComposer({
+  catalogItems,
+  units,
+  isLoadingCatalog,
+  isLoadingUnits,
+  isCreatingUnit,
+  onCreateUnit,
+  onAdd,
+}: {
+  catalogItems: CatalogItem[];
+  units: UnitOfMeasure[];
+  isLoadingCatalog: boolean;
+  isLoadingUnits: boolean;
+  isCreatingUnit: boolean;
+  onCreateUnit: (name: string) => Promise<UnitOfMeasure>;
+  onAdd: (line: RequestLineForm) => boolean;
+}) {
+  const [draft, setDraft] = useState<RequestLineForm>({ ...emptyLine });
+
+  function addMaterial() {
+    if (onAdd(draft)) {
+      setDraft({ ...emptyLine });
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-slate-50/70 p-3">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-[13px] font-bold text-ink">Agregar material</h3>
+          <p className="text-xs text-slate-500">Selecciona un producto, completa sus datos y confirma antes de agregarlo.</p>
+        </div>
+        <Badge tone="slate">Catálogo</Badge>
+      </div>
+      <MaterialForm
+        value={draft}
+        catalogItems={catalogItems}
+        units={units}
+        isLoadingCatalog={isLoadingCatalog}
+        isLoadingUnits={isLoadingUnits}
+        isCreatingUnit={isCreatingUnit}
+        saveLabel="Agregar a solicitud"
+        onChange={setDraft}
+        onCreateUnit={onCreateUnit}
+        onSave={addMaterial}
+        onCancel={draft.catalogItemId ? () => setDraft({ ...emptyLine }) : undefined}
+      />
+    </div>
+  );
+}
+
+function AddedMaterialRow({
   index,
-  displayOrder,
   line,
   catalogItems,
   units,
   isLoadingCatalog,
   isLoadingUnits,
   isCreatingUnit,
-  onUpdate,
-  onSelectCatalogItem,
-  onEditMaterial,
   onCreateUnit,
+  onSave,
   onRemove,
 }: {
   index: number;
-  displayOrder?: number;
   line: RequestLineForm;
   catalogItems: CatalogItem[];
   units: UnitOfMeasure[];
   isLoadingCatalog: boolean;
   isLoadingUnits: boolean;
   isCreatingUnit: boolean;
-  onUpdate: (index: number, key: keyof RequestLineForm, value: string) => void;
-  onSelectCatalogItem: (index: number, item: CatalogItem) => void;
-  onEditMaterial: (index: number) => void;
-  onCreateUnit: (index: number, name: string) => void;
+  onCreateUnit: (name: string) => Promise<UnitOfMeasure>;
+  onSave: (index: number, line: RequestLineForm) => boolean;
   onRemove: (index: number) => void;
 }) {
-  const [isAddingUnit, setIsAddingUnit] = useState(false);
-  const [newUnitName, setNewUnitName] = useState("");
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const selectedCatalogItem = line.catalogItemId ? catalogItems.find((item) => item.id === line.catalogItemId) : null;
-  const catalogQuery = (line.catalogSearch || line.description).trim();
-  const hasSelectedMaterial = Boolean(line.catalogItemId || line.description.trim());
-  const materialName = line.description.trim() || line.catalogSearch.trim();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<RequestLineForm>({ ...line });
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraft({ ...line });
+    }
+  }, [isEditing, line]);
+
+  function saveChanges() {
+    if (onSave(index, draft)) {
+      setIsEditing(false);
+    }
+  }
+
+  return (
+    <div className={isEditing ? "bg-brand-50/30" : "bg-white"}>
+      <div className="flex items-center gap-2 p-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition hover:bg-slate-50"
+          title="Editar material"
+          onClick={() => {
+            setDraft({ ...line });
+            setIsEditing(true);
+          }}
+        >
+          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-[11px] font-black text-brand-700">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-xs font-bold text-ink">{resolveLineDescription(line)}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {line.quantity} {line.unit || "sin unidad"}
+            </p>
+          </div>
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
+          title="Eliminar material"
+          onClick={() => onRemove(index)}
+        >
+          <X className="h-3.5 w-3.5 text-red-600" />
+        </Button>
+      </div>
+
+      {isEditing ? (
+        <div className="border-t border-border p-3">
+          <div className="mb-2">
+            <h4 className="text-xs font-bold text-ink">Editar material</h4>
+            <p className="text-[11px] text-slate-500">Los cambios reemplazarán este material; no crearán una copia.</p>
+          </div>
+          <MaterialForm
+            value={draft}
+            catalogItems={catalogItems}
+            units={units}
+            isLoadingCatalog={isLoadingCatalog}
+            isLoadingUnits={isLoadingUnits}
+            isCreatingUnit={isCreatingUnit}
+            saveLabel="Guardar cambios"
+            onChange={setDraft}
+            onCreateUnit={onCreateUnit}
+            onSave={saveChanges}
+            onCancel={() => {
+              setDraft({ ...line });
+              setIsEditing(false);
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MaterialForm({
+  value,
+  catalogItems,
+  units,
+  isLoadingCatalog,
+  isLoadingUnits,
+  isCreatingUnit,
+  saveLabel,
+  onChange,
+  onCreateUnit,
+  onSave,
+  onCancel,
+}: {
+  value: RequestLineForm;
+  catalogItems: CatalogItem[];
+  units: UnitOfMeasure[];
+  isLoadingCatalog: boolean;
+  isLoadingUnits: boolean;
+  isCreatingUnit: boolean;
+  saveLabel: string;
+  onChange: (line: RequestLineForm) => void;
+  onCreateUnit: (name: string) => Promise<UnitOfMeasure>;
+  onSave: () => void;
+  onCancel?: () => void;
+}) {
+  const hasSelection = Boolean(value.catalogItemId || value.description.trim());
+  const selectedCatalogItem = value.catalogItemId
+    ? catalogItems.find((item) => item.id === value.catalogItemId)
+    : null;
+  const catalogQuery = value.catalogSearch.trim();
   const catalogMatches = useMemo(() => {
     const words = catalogQuery.toLowerCase().split(/\s+/).filter(Boolean);
     const prioritizedItems = [...catalogItems].sort((left, right) => {
@@ -1289,15 +1398,192 @@ function RequestLineEditor({
       })
       .slice(0, 6);
   }, [catalogItems, catalogQuery]);
-  const unitOptions = useMemo(() => {
-    const options = new Map<string, UnitOfMeasure>();
+  const catalogUrl = `/catalog?from=quote-request&name=${encodeURIComponent(catalogQuery)}`;
+  const canSave = Boolean(resolveLineDescription(value) && Number(value.quantity) > 0 && value.unit.trim());
 
-    units.forEach((unit) => options.set(unit.name, unit));
+  function selectCatalogItem(item: CatalogItem) {
+    onChange({
+      ...value,
+      catalogItemId: item.id,
+      catalogSearch: item.name,
+      description: item.name,
+      unit: item.unit || value.unit || "unidad",
+      technicalSpecs: item.description || value.technicalSpecs,
+    });
+  }
 
-    if (line.unit && !options.has(line.unit)) {
-      options.set(line.unit, {
-        id: `line_${line.unit}`,
-        name: line.unit,
+  function changeMaterial() {
+    onChange({
+      ...value,
+      catalogItemId: undefined,
+      catalogSearch: "",
+      description: "",
+      unit: "unidad",
+      technicalSpecs: "",
+    });
+  }
+
+  if (!hasSelection) {
+    return (
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-brand-50 text-[10px] font-black text-brand-700">1</span>
+          <p className="text-xs font-bold text-ink">Selecciona del catálogo</p>
+        </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="pl-9"
+            value={value.catalogSearch}
+            onChange={(event) => onChange({ ...value, catalogSearch: event.target.value })}
+            placeholder="Buscar por nombre, categoría, marca o unidad"
+          />
+        </div>
+
+        <div className="mt-2 grid gap-2 xl:grid-cols-2">
+          {isLoadingCatalog ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-xs text-slate-500 xl:col-span-2">
+              Cargando catálogo...
+            </div>
+          ) : null}
+          {!isLoadingCatalog &&
+            catalogMatches.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="rounded-lg border border-border bg-white px-3 py-2 text-left transition hover:border-brand-300 hover:bg-brand-50/40"
+                onClick={() => selectCatalogItem(item)}
+              >
+                <p className="truncate text-[13px] font-bold text-ink">{item.name}</p>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {item.category?.name ?? "Sin categoría"} · {item.brand?.name ?? "Sin marca"}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  <Badge tone={item.type === "MATERIAL" ? "green" : "blue"}>
+                    {item.type === "MATERIAL" ? "Material" : "Servicio"}
+                  </Badge>
+                  {item.unit ? <Badge tone="slate">{item.unit}</Badge> : null}
+                  {item.supplierCount ? <Badge tone="slate">{item.supplierCount} supl.</Badge> : null}
+                </div>
+              </button>
+            ))}
+          {!isLoadingCatalog && !catalogMatches.length ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-xs text-slate-500 xl:col-span-2">
+              No encontramos materiales con esa búsqueda.
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
+          <span>¿No está registrado? Agrégalo al catálogo sin perder el borrador.</span>
+          <Link
+            to={catalogUrl}
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-ink px-3 font-bold text-white transition hover:bg-slate-800"
+          >
+            <PackagePlus className="h-3.5 w-3.5" />
+            Ir al catálogo
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-brand-200 bg-white p-3">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-bold text-ink">{resolveLineDescription(value)}</p>
+            <p className="text-[11px] text-slate-500">Seleccionado · completa los datos antes de guardar</p>
+          </div>
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={changeMaterial}>
+          Cambiar producto
+        </Button>
+      </div>
+
+      {selectedCatalogItem ? (
+        <div className="mb-3 grid gap-2 sm:grid-cols-4">
+          <MaterialInfo label="Categoría" value={selectedCatalogItem.category?.name ?? "Sin categoría"} />
+          <MaterialInfo label="Marca" value={selectedCatalogItem.brand?.name ?? "Sin marca"} />
+          <MaterialInfo label="Tipo" value={selectedCatalogItem.type === "MATERIAL" ? "Material" : "Servicio"} />
+          <MaterialInfo label="Suplidores" value={`${selectedCatalogItem.supplierCount || 0} asociados`} />
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 lg:grid-cols-[110px_190px_minmax(0,1fr)] lg:items-start">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cantidad</span>
+          <Input
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={value.quantity}
+            onChange={(event) => onChange({ ...value, quantity: event.target.value })}
+          />
+        </label>
+        <UnitControl
+          value={value.unit}
+          units={units}
+          isLoading={isLoadingUnits}
+          isCreating={isCreatingUnit}
+          onChange={(unit) => onChange({ ...value, unit })}
+          onCreateUnit={onCreateUnit}
+        />
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-600">Especificaciones</span>
+          <textarea
+            className="min-h-20 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            value={value.technicalSpecs}
+            onChange={(event) => onChange({ ...value, technicalSpecs: event.target.value })}
+            placeholder="Marca sugerida, norma, color, medida o detalle técnico."
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 flex justify-end gap-2">
+        {onCancel ? (
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            Cancelar
+          </Button>
+        ) : null}
+        <Button type="button" size="sm" disabled={!canSave} onClick={onSave}>
+          <CheckCircle2 className="h-4 w-4" />
+          {saveLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function UnitControl({
+  value,
+  units,
+  isLoading,
+  isCreating,
+  onChange,
+  onCreateUnit,
+}: {
+  value: string;
+  units: UnitOfMeasure[];
+  isLoading: boolean;
+  isCreating: boolean;
+  onChange: (value: string) => void;
+  onCreateUnit: (name: string) => Promise<UnitOfMeasure>;
+}) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
+  const options = useMemo(() => {
+    const result = new Map<string, UnitOfMeasure>();
+    units.forEach((unit) => result.set(unit.name, unit));
+
+    if (value && !result.has(value)) {
+      result.set(value, {
+        id: `line_${value}`,
+        name: value,
         abbreviation: null,
         isActive: true,
         createdAt: "",
@@ -1305,282 +1591,74 @@ function RequestLineEditor({
       });
     }
 
-    return Array.from(options.values()).sort((left, right) => left.name.localeCompare(right.name, "es"));
-  }, [line.unit, units]);
-  const catalogUrl = `/catalog?from=quote-request&name=${encodeURIComponent(catalogQuery)}`;
+    return Array.from(result.values()).sort((left, right) => left.name.localeCompare(right.name, "es"));
+  }, [units, value]);
 
-  function handleCatalogSearch(value: string) {
-    onUpdate(index, "catalogSearch", value);
-
-    if (line.catalogItemId) {
-      onUpdate(index, "catalogItemId", "");
-      onUpdate(index, "description", "");
-    }
-  }
-
-  function submitNewUnit() {
+  async function saveUnit() {
     const name = newUnitName.trim();
 
     if (!name) {
       return;
     }
 
-    onCreateUnit(index, name);
-    setNewUnitName("");
-    setIsAddingUnit(false);
+    try {
+      const unit = await onCreateUnit(name);
+      onChange(unit.name);
+      setNewUnitName("");
+      setIsAdding(false);
+    } catch {
+      // The parent mutation presents the readable error message.
+    }
   }
 
-  function clearMaterialSelection() {
-    onEditMaterial(index);
-    setIsDetailsOpen(false);
-  }
-
-  const compactUnitControl = (
+  return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold text-slate-500">Unidad</span>
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">Unidad</span>
       <select
-        className="h-8 w-full rounded-lg border border-border bg-white px-2.5 text-xs text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-        value={line.unit}
-        onChange={(event) => onUpdate(index, "unit", event.target.value)}
-        disabled={isLoadingUnits}
+        className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={isLoading}
       >
-        <option value="">{isLoadingUnits ? "Cargando..." : "Seleccionar"}</option>
-        {unitOptions.map((unit) => (
+        <option value="">{isLoading ? "Cargando..." : "Seleccionar"}</option>
+        {options.map((unit) => (
           <option key={unit.id} value={unit.name}>
             {unit.name}
             {unit.abbreviation ? ` (${unit.abbreviation})` : ""}
           </option>
         ))}
       </select>
-      {isAddingUnit ? (
-        <div className="mt-1.5 rounded-lg border border-border bg-white p-1.5">
-          <Input className="h-8 text-xs" value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Nueva unidad" />
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <Button type="button" size="sm" disabled={isCreatingUnit} onClick={submitNewUnit}>
+      {isAdding ? (
+        <div className="mt-2 rounded-lg border border-border bg-slate-50 p-2">
+          <Input
+            className="h-8 text-xs"
+            value={newUnitName}
+            onChange={(event) => setNewUnitName(event.target.value)}
+            placeholder="Nueva unidad"
+          />
+          <div className="mt-2 flex gap-1.5">
+            <Button type="button" size="sm" disabled={isCreating} onClick={saveUnit}>
               Guardar
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddingUnit(false)}>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setIsAdding(false)}>
               Cancelar
             </Button>
           </div>
         </div>
       ) : (
-        <button type="button" className="mt-1 text-[10px] font-bold text-brand-700 hover:text-brand-900" onClick={() => setIsAddingUnit(true)}>
+        <button type="button" className="mt-1.5 text-[11px] font-bold text-brand-700 hover:text-brand-900" onClick={() => setIsAdding(true)}>
           + Agregar unidad
         </button>
       )}
     </label>
   );
+}
 
-  if (hasSelectedMaterial) {
-    const rowNumber = typeof displayOrder === "number" ? displayOrder + 1 : index + 1;
-
-    return (
-      <div className="rounded-lg border border-border bg-white shadow-sm">
-        <div className="grid gap-2 px-2.5 py-2 lg:grid-cols-[minmax(0,1fr)_90px_160px_auto] lg:items-start">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-50 text-[11px] font-black text-brand-700">
-              {rowNumber}
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-xs font-bold text-ink">{materialName}</p>
-              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                <Badge tone="green">Agregado</Badge>
-                <span className="text-[11px] text-slate-500">
-                  {line.quantity || "0"} {line.unit || "sin unidad"}
-                </span>
-              </div>
-            </div>
-          </div>
-          <label className="block">
-            <span className="mb-1 block text-[11px] font-semibold text-slate-500">Cantidad</span>
-            <Input className="h-8 text-xs" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
-          </label>
-          {compactUnitControl}
-          <div className="flex shrink-0 items-center gap-1.5 lg:pt-5">
-            <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => setIsDetailsOpen((current) => !current)}>
-              <Eye className="h-3.5 w-3.5" />
-              {isDetailsOpen ? "Ocultar" : "Ver detalles"}
-            </Button>
-            <Button type="button" variant="outline" size="icon" className="h-8 w-8" title="Quitar material" onClick={() => onRemove(index)}>
-              <Trash2 className="h-3.5 w-3.5 text-red-600" />
-            </Button>
-          </div>
-        </div>
-
-        {isDetailsOpen ? (
-          <div className="border-t border-border bg-slate-50/60 p-2.5">
-            {selectedCatalogItem ? (
-              <div className="mb-2 grid gap-1.5 sm:grid-cols-4">
-                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Categoría</p>
-                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.category?.name ?? "Sin categoría"}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Marca</p>
-                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.brand?.name ?? "Sin marca"}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Tipo</p>
-                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.type === "MATERIAL" ? "Material" : "Servicio"}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-white px-2.5 py-1.5">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">Suplidores</p>
-                  <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{selectedCatalogItem.supplierCount || 0} asociados</p>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="grid gap-2">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Especificaciones</span>
-                <textarea
-                  className="min-h-16 w-full rounded-lg border border-border bg-white px-2.5 py-2 text-xs text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                  value={line.technicalSpecs}
-                  onChange={(event) => onUpdate(index, "technicalSpecs", event.target.value)}
-                  placeholder="Especificaciones técnicas, marca sugerida, norma o detalle."
-                />
-              </label>
-            </div>
-
-            <div className="mt-2 flex justify-end">
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={clearMaterialSelection}>
-                Editar nombre
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
+function MaterialInfo({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid gap-3 rounded-lg border border-border bg-slate-50/70 p-3 lg:grid-cols-[minmax(0,1fr)_86px_110px_36px] lg:items-start">
-      <div className="min-w-0">
-        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-          <span className="block text-xs font-semibold text-slate-500">Material, equipo o servicio</span>
-          {selectedCatalogItem ? <Badge tone="green">Seleccionado</Badge> : <Badge tone="slate">Catálogo</Badge>}
-        </div>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            className="pl-9"
-            value={line.catalogSearch}
-            onChange={(event) => handleCatalogSearch(event.target.value)}
-            placeholder="Buscar por nombre, categoría, marca o unidad"
-          />
-        </div>
-
-        <div className="mt-2 grid gap-2 xl:grid-cols-2">
-          {isLoadingCatalog ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500 xl:col-span-2">
-              Cargando catálogo...
-            </div>
-          ) : null}
-
-          {!isLoadingCatalog &&
-            catalogMatches.map((item) => {
-              const isSelected = item.id === line.catalogItemId;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`rounded-lg border bg-white px-3 py-2 text-left transition ${
-                    isSelected ? "border-brand-300 bg-brand-50" : "border-border hover:border-brand-200 hover:bg-white"
-                  }`}
-                  onClick={() => onSelectCatalogItem(index, item)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-bold text-ink">{item.name}</p>
-                      <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {item.category?.name ?? "Sin categoría"} · {item.brand?.name ?? "Sin marca"}
-                      </p>
-                    </div>
-                    {isSelected ? <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-700" /> : null}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    <Badge tone={item.type === "MATERIAL" ? "green" : "blue"}>{item.type === "MATERIAL" ? "Material" : "Servicio"}</Badge>
-                    {item.unit ? <Badge tone="slate">{item.unit}</Badge> : null}
-                    {item.supplierCount ? <Badge tone="slate">{item.supplierCount} supl.</Badge> : null}
-                  </div>
-                </button>
-              );
-            })}
-
-          {!isLoadingCatalog && !catalogMatches.length ? (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500 xl:col-span-2">
-              No aparece en el catálogo todavía.
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
-          <span>Si no está registrado, agrégalo al catálogo y vuelve al borrador.</span>
-          <Link
-            to={catalogUrl}
-            className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-ink px-2.5 font-bold text-white transition hover:bg-slate-800"
-          >
-            <PackagePlus className="h-3.5 w-3.5" />
-            Agregar material
-          </Link>
-        </div>
-        <textarea
-          className="mt-2 min-h-16 w-full rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-          value={line.technicalSpecs}
-          onChange={(event) => onUpdate(index, "technicalSpecs", event.target.value)}
-          placeholder="Especificaciones técnicas, marca sugerida, norma o detalle."
-        />
-      </div>
-      <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold text-slate-500">Cantidad</span>
-        <Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => onUpdate(index, "quantity", event.target.value)} />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold text-slate-500">Unidad</span>
-        <select
-          className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-          value={line.unit}
-          onChange={(event) => onUpdate(index, "unit", event.target.value)}
-          disabled={isLoadingUnits}
-        >
-          <option value="">{isLoadingUnits ? "Cargando..." : "Seleccionar"}</option>
-          {unitOptions.map((unit) => (
-            <option key={unit.id} value={unit.name}>
-              {unit.name}{unit.abbreviation ? ` (${unit.abbreviation})` : ""}
-            </option>
-          ))}
-        </select>
-        {isAddingUnit ? (
-          <div className="mt-2 rounded-lg border border-border bg-white p-2">
-            <Input
-              value={newUnitName}
-              onChange={(event) => setNewUnitName(event.target.value)}
-              placeholder="Nueva unidad"
-            />
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <Button type="button" size="sm" disabled={isCreatingUnit} onClick={submitNewUnit}>
-                Guardar
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setIsAddingUnit(false)}>
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="mt-1.5 text-[11px] font-bold text-brand-700 hover:text-brand-900"
-            onClick={() => setIsAddingUnit(true)}
-          >
-            + Agregar unidad
-          </button>
-        )}
-      </label>
-      <Button type="button" variant="outline" size="icon" title="Quitar línea" onClick={() => onRemove(index)}>
-        <Trash2 className="h-4 w-4 text-red-600" />
-      </Button>
+    <div className="rounded-md border border-border bg-slate-50 px-2.5 py-2">
+      <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-0.5 truncate text-[11px] font-bold text-ink">{value}</p>
     </div>
   );
 }
