@@ -65,3 +65,35 @@ export function requireSystemAdmin(req: Request, res: Response, next: NextFuncti
 
   return next();
 }
+
+export type Permission =
+  | "suppliers:write"
+  | "catalog:write"
+  | "purchases:write"
+  | "inventory:write"
+  | "organization:manage";
+
+const permissionsByRole: Record<string, Permission[]> = {
+  SYSTEM_ADMIN: ["suppliers:write", "catalog:write", "purchases:write", "inventory:write", "organization:manage"],
+  OWNER: ["suppliers:write", "catalog:write", "purchases:write", "inventory:write", "organization:manage"],
+  ADMIN: ["suppliers:write", "catalog:write", "purchases:write", "inventory:write", "organization:manage"],
+  MANAGER: ["suppliers:write", "catalog:write", "purchases:write", "inventory:write"],
+  BUYER: ["suppliers:write", "catalog:write", "purchases:write"],
+  WAREHOUSE: ["inventory:write"],
+  VIEWER: [],
+  CLIENT: [],
+};
+
+export function requirePermission(permission: Permission) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const role = req.user?.role;
+
+    if (!role || !permissionsByRole[role]?.includes(permission)) {
+      return res.status(403).json({
+        message: "No tienes permisos para realizar esta acción.",
+      });
+    }
+
+    return next();
+  };
+}

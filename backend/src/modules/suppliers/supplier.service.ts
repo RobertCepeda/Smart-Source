@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { recordAudit } from "../../lib/audit";
 import type { createSupplierSchema, supplierQuerySchema, updateSupplierSchema } from "./supplier.schema";
 import type { z } from "zod";
 
@@ -40,6 +41,10 @@ function cleanString(value?: string | null) {
   return cleaned ? cleaned : undefined;
 }
 
+function upperString(value?: string | null) {
+  return cleanString(value)?.toLocaleUpperCase("es");
+}
+
 function cleanUrl(value?: string | null) {
   const cleaned = cleanString(value);
   return cleaned || undefined;
@@ -47,18 +52,17 @@ function cleanUrl(value?: string | null) {
 
 function supplierData(input: Partial<SupplierCreateInput>) {
   return {
-    name: cleanString(input.name),
-    rnc: cleanString(input.rnc),
-    category: cleanString(input.category),
-    city: cleanString(input.city),
-    address: cleanString(input.address),
-    phone: cleanString(input.phone),
-    whatsapp: cleanString(input.whatsapp),
-    email: cleanString(input.email),
-    website: cleanUrl(input.website),
-    instagram: cleanString(input.instagram),
-    facebook: cleanString(input.facebook),
-    notes: cleanString(input.notes),
+    name: upperString(input.name),
+    rnc: upperString(input.rnc),
+    city: upperString(input.city),
+    address: upperString(input.address),
+    phone: upperString(input.phone),
+    whatsapp: upperString(input.whatsapp),
+    email: upperString(input.email),
+    website: upperString(cleanUrl(input.website)),
+    instagram: upperString(input.instagram),
+    facebook: upperString(input.facebook),
+    notes: upperString(input.notes),
     rating: input.rating,
   };
 }
@@ -112,7 +116,7 @@ async function getSupplierOrThrow(organizationId: string, id: string) {
 }
 
 function uniqueValues(values?: string[]) {
-  return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
+  return Array.from(new Set((values ?? []).map((value) => upperString(value)).filter(Boolean))) as string[];
 }
 
 async function syncTags(tx: any, supplierId: string, tags?: string[]) {
@@ -148,7 +152,7 @@ async function syncCatalogItems(
   await tx.supplierItem.deleteMany({ where: { supplierId } });
 
   for (const catalogItem of catalogItems) {
-    const name = catalogItem.name.trim();
+    const name = upperString(catalogItem.name)!;
     const item =
       (await tx.item.findFirst({
         where: { organizationId, name: { equals: name, mode: "insensitive" }, type: catalogItem.type },
@@ -158,7 +162,7 @@ async function syncCatalogItems(
           organizationId,
           name,
           type: catalogItem.type,
-          unit: cleanString(catalogItem.unit),
+          unit: upperString(catalogItem.unit),
         },
       }));
 
@@ -186,11 +190,11 @@ async function syncContacts(tx: any, supplierId: string, contacts?: SupplierCrea
   await tx.contact.createMany({
     data: contacts.map((contact, index) => ({
       supplierId,
-      name: contact.name.trim(),
-      role: cleanString(contact.role),
-      phone: cleanString(contact.phone),
-      whatsapp: cleanString(contact.whatsapp),
-      email: cleanString(contact.email),
+      name: upperString(contact.name)!,
+      role: upperString(contact.role),
+      phone: upperString(contact.phone),
+      whatsapp: upperString(contact.whatsapp),
+      email: upperString(contact.email),
       isPrimary: contact.isPrimary ?? index === 0,
     })),
   });
@@ -248,12 +252,12 @@ export async function getSupplierById(organizationId: string, id: string) {
   return mapSupplier(await getSupplierOrThrow(organizationId, id));
 }
 
-export async function createSupplier(organizationId: string, input: SupplierCreateInput) {
+export async function createSupplier(organizationId: string, actorId: string, input: SupplierCreateInput) {
   const supplier = await prisma.$transaction(async (tx) => {
     const created = await tx.supplier.create({
       data: {
         ...supplierData(input),
-        name: input.name.trim(),
+        name: upperString(input.name)!,
         organizationId,
       },
     });
@@ -261,6 +265,19 @@ export async function createSupplier(organizationId: string, input: SupplierCrea
     await syncContacts(tx, created.id, input.contacts);
     await syncTags(tx, created.id, input.tags);
     await syncCatalogItems(tx, organizationId, created.id, input.catalogItems);
+
+    await recordAudit(
+      {
+        organizationId,
+        userId: actorId,
+        action: "CREATE",
+        entityType: "SUPPLIER",
+        entityId: created.id,
+        summary: `Creó el suplidor ${created.name}`,
+        after: created,
+      },
+      tx,
+    );
 
     return tx.supplier.findUniqueOrThrow({
       where: { id: created.id },
@@ -271,8 +288,8 @@ export async function createSupplier(organizationId: string, input: SupplierCrea
   return mapSupplier(supplier);
 }
 
-export async function updateSupplier(organizationId: string, id: string, input: SupplierUpdateInput) {
-  await getSupplierOrThrow(organizationId, id);
+export async function updateSupplier(organizationId: string, actorId: string, id: string, input: SupplierUpdateInput) {
+  const previous = await getSupplierOrThrow(organizationId, id);
 
   const supplier = await prisma.$transaction(async (tx) => {
     await tx.supplier.update({
@@ -284,6 +301,20 @@ export async function updateSupplier(organizationId: string, id: string, input: 
     await syncTags(tx, id, input.tags);
     await syncCatalogItems(tx, organizationId, id, input.catalogItems);
 
+    await recordAudit(
+      {
+        organizationId,
+        userId: actorId,
+        action: "UPDATE",
+        entityType: "SUPPLIER",
+        entityId: id,
+        summary: `Actualizó el suplidor ${previous.name}`,
+        before: previous,
+        after: input,
+      },
+      tx,
+    );
+
     return tx.supplier.findUniqueOrThrow({
       where: { id },
       select: supplierSelect,
@@ -293,11 +324,47 @@ export async function updateSupplier(organizationId: string, id: string, input: 
   return mapSupplier(supplier);
 }
 
-export async function deactivateSupplier(organizationId: string, id: string) {
-  await getSupplierOrThrow(organizationId, id);
+export async function deactivateSupplier(organizationId: string, actorId: string, id: string) {
+  const previous = await getSupplierOrThrow(organizationId, id);
 
   await prisma.supplier.update({
     where: { id },
-    data: { isActive: false },
+    data: { isActive: false, deletedAt: new Date() },
+  });
+
+  await recordAudit({
+    organizationId,
+    userId: actorId,
+    action: "DELETE",
+    entityType: "SUPPLIER",
+    entityId: id,
+    summary: `Eliminó el suplidor ${previous.name}`,
+    before: previous,
+    metadata: { restorable: true },
+  });
+}
+
+export async function restoreSupplier(organizationId: string, actorId: string, id: string) {
+  const supplier = await prisma.supplier.findFirst({ where: { id, organizationId, isActive: false } });
+
+  if (!supplier) {
+    const error = new Error("No se encontró un suplidor eliminado para restaurar.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+
+  const restored = await prisma.supplier.update({
+    where: { id },
+    data: { isActive: true, deletedAt: null },
+  });
+
+  await recordAudit({
+    organizationId,
+    userId: actorId,
+    action: "RESTORE",
+    entityType: "SUPPLIER",
+    entityId: id,
+    summary: `Restauró el suplidor ${restored.name}`,
+    after: restored,
   });
 }

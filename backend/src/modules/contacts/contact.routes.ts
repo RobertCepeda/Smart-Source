@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../auth/auth.middleware";
+import { authenticate, requirePermission } from "../auth/auth.middleware";
 import { validate } from "../../middlewares/validate";
 import { contactIdParamsSchema, updateContactSchema } from "./contact.schema";
 import { deleteContact, updateContact } from "./contact.service";
@@ -18,20 +18,20 @@ function organizationId(req: Express.Request) {
   return req.user.organizationId;
 }
 
-contactRouter.put("/:id", validate({ params: contactIdParamsSchema, body: updateContactSchema }), async (req, res, next) => {
+contactRouter.put("/:id", requirePermission("suppliers:write"), validate({ params: contactIdParamsSchema, body: updateContactSchema }), async (req, res, next) => {
   try {
     const { id } = contactIdParamsSchema.parse(req.params);
-    const contact = await updateContact(organizationId(req), id, updateContactSchema.parse(req.body));
+    const contact = await updateContact(organizationId(req), req.user!.id, id, updateContactSchema.parse(req.body));
     res.json({ contact });
   } catch (error) {
     next(error);
   }
 });
 
-contactRouter.delete("/:id", validate({ params: contactIdParamsSchema }), async (req, res, next) => {
+contactRouter.delete("/:id", requirePermission("suppliers:write"), validate({ params: contactIdParamsSchema }), async (req, res, next) => {
   try {
     const { id } = contactIdParamsSchema.parse(req.params);
-    await deleteContact(organizationId(req), id);
+    await deleteContact(organizationId(req), req.user!.id, id);
     res.status(204).send();
   } catch (error) {
     next(error);

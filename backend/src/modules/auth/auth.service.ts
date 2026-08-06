@@ -78,8 +78,9 @@ function signToken(user: AuthUser) {
 }
 
 export async function register(input: RegisterInput) {
+  const normalizedEmail = input.email.trim().toLowerCase();
   const existingUser = await prisma.user.findUnique({
-    where: { email: input.email },
+    where: { email: normalizedEmail },
   });
 
   if (existingUser) {
@@ -98,7 +99,7 @@ export async function register(input: RegisterInput) {
       data: {
         name: organizationName,
         slug: organizationSlug,
-        billingEmail: input.email,
+        billingEmail: normalizedEmail,
         accountType: input.accountType,
         plan,
       },
@@ -108,10 +109,10 @@ export async function register(input: RegisterInput) {
       data: {
         organizationId: organization.id,
         name: input.name,
-        email: input.email,
+        email: normalizedEmail,
         company: input.company ?? organization.name,
         passwordHash,
-        role: "ADMIN",
+        role: "OWNER",
       },
       include: { organization: true },
     });
@@ -124,14 +125,31 @@ export async function register(input: RegisterInput) {
 }
 
 export async function login(input: LoginInput) {
+  const normalizedEmail = input.email.trim().toLowerCase();
   const user = await prisma.user.findUnique({
-    where: { email: input.email },
+    where: { email: normalizedEmail },
     include: { organization: true },
   });
+
+  if (user?.lockedUntil && user.lockedUntil > new Date()) {
+    const error = new Error("La cuenta está temporalmente bloqueada. Intenta nuevamente en 15 minutos.");
+    (error as Error & { status: number }).status = 429;
+    throw error;
+  }
 
   const isValidPassword = user?.passwordHash ? await bcrypt.compare(input.password, user.passwordHash) : false;
 
   if (!user || !isValidPassword || !user.isActive) {
+    if (user?.isActive) {
+      const attempts = user.failedLoginAttempts + 1;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: attempts >= 5 ? 0 : attempts,
+          lockedUntil: attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null,
+        },
+      });
+    }
     const error = new Error("Correo o contraseña incorrecta.");
     (error as Error & { status: number }).status = 401;
     throw error;
@@ -139,7 +157,7 @@ export async function login(input: LoginInput) {
 
   const updatedUser = await prisma.user.update({
     where: { id: user.id },
-    data: { lastLoginAt: new Date() },
+    data: { lastLoginAt: new Date(), failedLoginAttempts: 0, lockedUntil: null },
     include: { organization: true },
   });
 

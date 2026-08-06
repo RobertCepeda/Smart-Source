@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { recordAudit } from "../../lib/audit";
 import type {
   createPurchaseOrderSchema,
   listPurchaseOrdersQuerySchema,
@@ -38,6 +39,9 @@ const orderInclude = {
     },
     orderBy: { id: "asc" as const },
   },
+  warehouse: { select: { id: true, name: true, code: true, type: true, location: true } },
+  quoteRequest: { select: { id: true, number: true, project: true, costCenter: true } },
+  receivedBy: { select: { id: true, name: true } },
 };
 
 function cleanString(value?: string | null) {
@@ -58,6 +62,11 @@ function mapOrder(order: any) {
     id: order.id,
     number: order.number,
     supplierId: order.supplierId,
+    organizationId: order.organizationId,
+    quoteRequestId: order.quoteRequestId,
+    warehouseId: order.warehouseId,
+    receivedAt: order.receivedAt,
+    costCenter: order.costCenter,
     status: order.status,
     issueDate: order.issueDate,
     currency: order.currency,
@@ -66,6 +75,9 @@ function mapOrder(order: any) {
     total: order.total.toString(),
     notes: order.notes,
     supplier: order.supplier,
+    warehouse: order.warehouse,
+    quoteRequest: order.quoteRequest,
+    receivedBy: order.receivedBy,
     lines: order.lines.map((line: any) => ({
       id: line.id,
       itemId: line.itemId,
@@ -94,7 +106,7 @@ async function ensureOrder(organizationId: string, id: string) {
   const order = await prisma.purchaseOrder.findFirst({
     where: {
       id,
-      supplier: { organizationId },
+      organizationId,
     },
     include: orderInclude,
   });
@@ -129,7 +141,7 @@ async function ensureItems(organizationId: string, itemIds: string[]) {
 async function nextOrderNumber(tx: any, organizationId: string) {
   const year = new Date().getFullYear();
   const baseCount = await tx.purchaseOrder.count({
-    where: { supplier: { organizationId } },
+    where: { organizationId },
   });
 
   for (let attempt = 1; attempt <= 20; attempt += 1) {
@@ -156,8 +168,8 @@ export async function listPurchaseOrders(organizationId: string, query: ListPurc
 
   const orders = await prisma.purchaseOrder.findMany({
     where: {
+      organizationId,
       supplier: {
-        organizationId,
         ...(cleanString(query.supplierId) ? { id: query.supplierId } : {}),
       },
       ...(query.status ? { status: query.status } : {}),
@@ -185,9 +197,18 @@ export async function getPurchaseOrder(organizationId: string, id: string) {
   return mapOrder(await ensureOrder(organizationId, id));
 }
 
-export async function createPurchaseOrder(organizationId: string, input: CreatePurchaseOrderInput) {
+export async function createPurchaseOrder(organizationId: string, actorId: string, input: CreatePurchaseOrderInput) {
   await ensureSupplier(organizationId, input.supplierId);
   await ensureItems(organizationId, input.lines.map((line) => line.itemId));
+
+  const quoteRequest = input.quoteRequestId
+    ? await prisma.quoteRequest.findFirst({ where: { id: input.quoteRequestId, organizationId } })
+    : null;
+  if (input.quoteRequestId && !quoteRequest) {
+    const error = new Error("La solicitud de cotización no pertenece a tu organización.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
 
   const lines = input.lines.map((line) => {
     const lineTotal = money(line.quantity * line.unitPrice);
@@ -210,8 +231,11 @@ export async function createPurchaseOrder(organizationId: string, input: CreateP
 
     const createdOrder = await tx.purchaseOrder.create({
       data: {
+        organizationId,
         number,
         supplierId: input.supplierId,
+        quoteRequestId: input.quoteRequestId,
+        costCenter: cleanString(input.costCenter) ?? quoteRequest?.costCenter ?? undefined,
         issueDate: input.issueDate ? new Date(input.issueDate) : undefined,
         currency: input.currency.trim().toUpperCase(),
         subtotal: decimalString(subtotal),
@@ -236,6 +260,11 @@ export async function createPurchaseOrder(organizationId: string, input: CreateP
       })),
     });
 
+    await recordAudit(
+      { organizationId, userId: actorId, action: "CREATE", entityType: "PURCHASE_ORDER", entityId: createdOrder.id, summary: `Creó la orden ${createdOrder.number}`, after: createdOrder },
+      tx,
+    );
+
     return createdOrder;
   });
 
@@ -244,16 +273,87 @@ export async function createPurchaseOrder(organizationId: string, input: CreateP
 
 export async function updatePurchaseOrderStatus(
   organizationId: string,
+  actorId: string,
   id: string,
   input: UpdateOrderStatusInput,
 ) {
-  await ensureOrder(organizationId, id);
+  const previous = await ensureOrder(organizationId, id);
 
-  const order = await prisma.purchaseOrder.update({
-    where: { id },
-    data: { status: input.status },
-    include: orderInclude,
-  });
+  if (input.status === "RECIBIDA") {
+    if (previous.status === "RECIBIDA") {
+      const error = new Error("Esta orden ya fue recibida y contabilizada en inventario.");
+      (error as Error & { status: number }).status = 400;
+      throw error;
+    }
+    const inventoryLines = previous.lines.filter((line) => line.item.type === "MATERIAL");
+    if (inventoryLines.length > 0 && !input.warehouseId) {
+      const error = new Error("Selecciona el almacén que recibirá los productos.");
+      (error as Error & { status: number }).status = 400;
+      throw error;
+    }
+    const warehouse = input.warehouseId
+      ? await prisma.warehouse.findFirst({ where: { id: input.warehouseId, organizationId, isActive: true } })
+      : null;
+    if (inventoryLines.length > 0 && !warehouse) {
+      const error = new Error("El almacén seleccionado no es válido.");
+      (error as Error & { status: number }).status = 404;
+      throw error;
+    }
 
+    const received = await prisma.$transaction(async (tx) => {
+      for (const line of inventoryLines) {
+        await tx.inventoryBalance.upsert({
+          where: { warehouseId_itemId: { warehouseId: warehouse!.id, itemId: line.itemId } },
+          update: { quantity: { increment: line.quantity } },
+          create: { warehouseId: warehouse!.id, itemId: line.itemId, quantity: line.quantity },
+        });
+        await tx.inventoryMovement.create({
+          data: {
+            organizationId,
+            warehouseId: warehouse!.id,
+            itemId: line.itemId,
+            orderId: previous.id,
+            createdById: actorId,
+            type: "ENTRADA",
+            quantity: line.quantity,
+            unit: line.item.unit,
+            reference: previous.number,
+            notes: `RECEPCIÓN DE ORDEN ${previous.number}`,
+          },
+        });
+      }
+      const updated = await tx.purchaseOrder.update({
+        where: { id },
+        data: { status: "RECIBIDA", warehouseId: warehouse?.id, receivedById: actorId, receivedAt: new Date() },
+        include: orderInclude,
+      });
+      await recordAudit(
+        {
+          organizationId,
+          userId: actorId,
+          action: "RECEIVE",
+          entityType: "PURCHASE_ORDER",
+          entityId: id,
+          summary: warehouse
+            ? `Recibió la orden ${previous.number} en ${warehouse.name}`
+            : `Completó la orden de servicios ${previous.number}`,
+          before: { status: previous.status },
+          after: { status: "RECIBIDA", warehouseId: warehouse?.id ?? null },
+        },
+        tx,
+      );
+      return updated;
+    });
+    return mapOrder(received);
+  }
+
+  if (previous.status === "RECIBIDA") {
+    const error = new Error("Una orden recibida no puede cambiar de estado porque ya afectó inventario.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+
+  const order = await prisma.purchaseOrder.update({ where: { id }, data: { status: input.status }, include: orderInclude });
+  await recordAudit({ organizationId, userId: actorId, action: "STATUS_CHANGE", entityType: "PURCHASE_ORDER", entityId: id, summary: `Cambió ${order.number} a ${input.status}`, before: { status: previous.status }, after: { status: input.status } });
   return mapOrder(order);
 }

@@ -11,13 +11,16 @@ import {
   createPurchaseOrderRequest,
   listCatalogItemsRequest,
   listPurchaseOrdersRequest,
+  listQuoteRequestsRequest,
   listSuppliersRequest,
+  listWarehousesRequest,
   updatePurchaseOrderStatusRequest,
   type CatalogItem,
   type PurchaseOrder,
   type PurchaseOrderPayload,
   type PurchaseOrderStatus,
   type Supplier,
+  type Warehouse,
 } from "../services/api";
 
 type LineForm = {
@@ -53,6 +56,8 @@ export function PurchaseOrders() {
   const [currency, setCurrency] = useState("DOP");
   const [taxRate, setTaxRate] = useState("0.18");
   const [notes, setNotes] = useState("");
+  const [costCenter, setCostCenter] = useState("");
+  const [quoteRequestId, setQuoteRequestId] = useState("");
   const [lines, setLines] = useState<LineForm[]>([{ ...emptyLine }]);
   const [statusFilter, setStatusFilter] = useState<PurchaseOrderStatus | "">("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -75,9 +80,14 @@ export function PurchaseOrders() {
     enabled: Boolean(token),
   });
 
+  const quoteRequestsQuery = useQuery({ queryKey: ["quote-requests", "order-form"], queryFn: () => listQuoteRequestsRequest(token!), enabled: Boolean(token) });
+  const warehousesQuery = useQuery({ queryKey: ["warehouses", "order-form"], queryFn: () => listWarehousesRequest(token!), enabled: Boolean(token) });
+
   const suppliers = useMemo(() => suppliersQuery.data?.suppliers ?? [], [suppliersQuery.data?.suppliers]);
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
   const orders = useMemo(() => ordersQuery.data?.orders ?? [], [ordersQuery.data?.orders]);
+  const quoteRequests = quoteRequestsQuery.data?.requests ?? [];
+  const warehouses = warehousesQuery.data?.warehouses ?? [];
   const selectedSupplier = suppliers.find((supplier) => supplier.id === supplierId) ?? null;
 
   useEffect(() => {
@@ -114,6 +124,8 @@ export function PurchaseOrders() {
     onSuccess: async ({ order }) => {
       setNotice(`Orden ${order.number} creada correctamente.`);
       setNotes("");
+      setCostCenter("");
+      setQuoteRequestId("");
       setLines([{ ...emptyLine }]);
       await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
@@ -121,8 +133,8 @@ export function PurchaseOrders() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: PurchaseOrderStatus }) =>
-      updatePurchaseOrderStatusRequest(token!, id, status),
+    mutationFn: ({ id, status, warehouseId }: { id: string; status: PurchaseOrderStatus; warehouseId?: string }) =>
+      updatePurchaseOrderStatusRequest(token!, id, status, warehouseId),
     onSuccess: async ({ order }) => {
       setNotice(`Orden ${order.number} actualizada a ${statusLabels[order.status]}.`);
       await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
@@ -187,6 +199,8 @@ export function PurchaseOrders() {
       currency,
       taxRate: Number(taxRate) || 0,
       notes,
+      costCenter,
+      quoteRequestId: quoteRequestId || undefined,
       lines: validLines,
     });
   }
@@ -249,6 +263,20 @@ export function PurchaseOrders() {
                     <option value="0.18">18%</option>
                     <option value="0">0%</option>
                   </select>
+                </label>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Solicitud de origen</span>
+                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={quoteRequestId} onChange={(event) => { const id = event.target.value; setQuoteRequestId(id); const request = quoteRequests.find((entry) => entry.id === id); if (request?.costCenter) setCostCenter(request.costCenter); }}>
+                    <option value="">Orden directa</option>
+                    {quoteRequests.map((request) => <option key={request.id} value={request.id}>{request.number} · {request.project}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Centro de costo</span>
+                  <Input value={costCenter} onChange={(event) => setCostCenter(event.target.value)} placeholder="Ej. CC-204" />
                 </label>
               </div>
 
@@ -338,7 +366,8 @@ export function PurchaseOrders() {
               <OrderCard
                 key={order.id}
                 order={order}
-                onStatusChange={(status) => statusMutation.mutate({ id: order.id, status })}
+                warehouses={warehouses}
+                onStatusChange={(status, warehouseId) => statusMutation.mutate({ id: order.id, status, warehouseId })}
                 isUpdating={statusMutation.isPending}
               />
             ))}
@@ -425,14 +454,18 @@ function OrderLineEditor({
 
 function OrderCard({
   order,
+  warehouses,
   onStatusChange,
   isUpdating,
 }: {
   order: PurchaseOrder;
-  onStatusChange: (status: PurchaseOrderStatus) => void;
+  warehouses: Warehouse[];
+  onStatusChange: (status: PurchaseOrderStatus, warehouseId?: string) => void;
   isUpdating: boolean;
 }) {
   const actions = nextStatusActions(order.status);
+  const [warehouseId, setWarehouseId] = useState(order.warehouseId ?? "");
+  const requiresWarehouse = order.lines.some((line) => line.item.type === "MATERIAL");
 
   return (
     <div className="rounded-lg border border-border p-3.5">
@@ -446,6 +479,8 @@ function OrderCard({
           <p className="mt-1 text-xs text-slate-500">
             {new Date(order.issueDate).toLocaleDateString()} - {order.lines.length} líneas
           </p>
+          {order.costCenter ? <p className="mt-1 text-xs font-semibold text-brand-700">Centro de costo: {order.costCenter}</p> : null}
+          {order.warehouse ? <p className="mt-1 text-xs text-slate-500">Recibida en {order.warehouse.name}</p> : null}
         </div>
         <div className="text-left sm:text-right">
           <p className="text-base font-bold text-ink">{formatMoney(Number(order.total), order.currency)}</p>
@@ -481,6 +516,22 @@ function OrderCard({
           ))}
         </div>
       ) : null}
+      {order.status === "ENVIADA" ? (
+        <div className="mt-3 flex flex-col gap-2 rounded-lg border border-brand-100 bg-brand-50/50 p-2.5 sm:flex-row sm:items-center">
+          {requiresWarehouse ? (
+            <select className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-white px-3 text-[13px]" value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)}>
+              <option value="">Almacén de recepción</option>
+              {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} · {warehouse.code}</option>)}
+            </select>
+          ) : (
+            <p className="flex-1 text-xs text-slate-600">Esta orden contiene servicios y no afecta inventario.</p>
+          )}
+          <Button type="button" size="sm" disabled={isUpdating || (requiresWarehouse && !warehouseId)} onClick={() => onStatusChange("RECIBIDA", requiresWarehouse ? warehouseId : undefined)}>
+            <CheckCircle2 className="h-4 w-4" />
+            {requiresWarehouse ? "Recibir e ingresar" : "Completar servicio"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -495,7 +546,6 @@ function nextStatusActions(status: PurchaseOrderStatus) {
 
   if (status === "ENVIADA") {
     return [
-      { status: "RECIBIDA" as const, label: "Recibir", icon: CheckCircle2, variant: "secondary" as const },
       { status: "CANCELADA" as const, label: "Cancelar", icon: XCircle, variant: "outline" as const },
     ];
   }

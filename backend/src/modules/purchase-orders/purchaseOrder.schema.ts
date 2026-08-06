@@ -18,6 +18,8 @@ export const createPurchaseOrderSchema = z.object({
   currency: z.string().trim().min(3).max(3).default("DOP"),
   taxRate: z.coerce.number().min(0).max(1).default(0.18),
   notes: z.string().trim().max(800).optional(),
+  costCenter: z.string().trim().max(80).optional(),
+  quoteRequestId: z.string().optional(),
   lines: z
     .array(
       z.object({
@@ -31,4 +33,5 @@ export const createPurchaseOrderSchema = z.object({
 
 export const updateOrderStatusSchema = z.object({
   status: z.enum(["BORRADOR", "ENVIADA", "RECIBIDA", "CANCELADA"]),
+  warehouseId: z.string().optional(),
 });

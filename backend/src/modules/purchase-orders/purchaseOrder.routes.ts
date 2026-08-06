@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { validate } from "../../middlewares/validate";
-import { authenticate } from "../auth/auth.middleware";
+import { authenticate, requirePermission } from "../auth/auth.middleware";
 import {
   createPurchaseOrderSchema,
   listPurchaseOrdersQuerySchema,
@@ -37,9 +37,9 @@ purchaseOrderRouter.get("/", validate({ query: listPurchaseOrdersQuerySchema }),
   }
 });
 
-purchaseOrderRouter.post("/", validate({ body: createPurchaseOrderSchema }), async (req, res, next) => {
+purchaseOrderRouter.post("/", requirePermission("purchases:write"), validate({ body: createPurchaseOrderSchema }), async (req, res, next) => {
   try {
-    const order = await createPurchaseOrder(organizationId(req), createPurchaseOrderSchema.parse(req.body));
+    const order = await createPurchaseOrder(organizationId(req), req.user!.id, createPurchaseOrderSchema.parse(req.body));
     res.status(201).json({ order });
   } catch (error) {
     next(error);
@@ -58,11 +58,12 @@ purchaseOrderRouter.get("/:id", validate({ params: purchaseOrderIdParamsSchema }
 
 purchaseOrderRouter.put(
   "/:id/status",
+  requirePermission("purchases:write"),
   validate({ params: purchaseOrderIdParamsSchema, body: updateOrderStatusSchema }),
   async (req, res, next) => {
     try {
       const { id } = purchaseOrderIdParamsSchema.parse(req.params);
-      const order = await updatePurchaseOrderStatus(organizationId(req), id, updateOrderStatusSchema.parse(req.body));
+      const order = await updatePurchaseOrderStatus(organizationId(req), req.user!.id, id, updateOrderStatusSchema.parse(req.body));
       res.json({ order });
     } catch (error) {
       next(error);

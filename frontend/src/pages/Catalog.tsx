@@ -12,11 +12,13 @@ import {
   createBrandRequest,
   createCatalogItemRequest,
   createCategoryRequest,
+  createSubcategoryRequest,
   deleteCatalogItemRequest,
   getQuoteRequestDraftRequest,
   listBrandsRequest,
   listCatalogItemsRequest,
   listCategoriesRequest,
+  listSubcategoriesRequest,
   type CatalogFilters,
   type CatalogItemPayload,
 } from "../services/api";
@@ -26,6 +28,7 @@ const emptyItem: CatalogItemPayload = {
   type: "MATERIAL",
   unit: "",
   categoryId: "",
+  subcategoryId: "",
   brandId: "",
   description: "",
 };
@@ -37,6 +40,8 @@ export function Catalog() {
   const [filters, setFilters] = useState<CatalogFilters>({});
   const [itemForm, setItemForm] = useState<CatalogItemPayload>(emptyItem);
   const [newCategory, setNewCategory] = useState("");
+  const [subcategoryCategoryId, setSubcategoryCategoryId] = useState("");
+  const [newSubcategory, setNewSubcategory] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const fromQuoteRequest = searchParams.get("from") === "quote-request";
@@ -75,9 +80,17 @@ export function Catalog() {
     enabled: Boolean(token),
   });
 
+  const subcategoriesQuery = useQuery({
+    queryKey: ["subcategories"],
+    queryFn: () => listSubcategoriesRequest(token!),
+    enabled: Boolean(token),
+  });
+
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
   const categories = categoriesQuery.data?.categories ?? [];
   const brands = brandsQuery.data?.brands ?? [];
+  const subcategories = subcategoriesQuery.data?.subcategories ?? [];
+  const itemSubcategories = subcategories.filter((entry) => entry.categoryId === itemForm.categoryId);
 
   const stats = useMemo(() => {
     return {
@@ -114,6 +127,14 @@ export function Catalog() {
     },
   });
 
+  const createSubcategoryMutation = useMutation({
+    mutationFn: () => createSubcategoryRequest(token!, { categoryId: subcategoryCategoryId, name: newSubcategory }),
+    onSuccess: async () => {
+      setNewSubcategory("");
+      await queryClient.invalidateQueries({ queryKey: ["subcategories"] });
+    },
+  });
+
   const deleteItemMutation = useMutation({
     mutationFn: (id: string) => deleteCatalogItemRequest(token!, id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog-items"] }),
@@ -133,7 +154,7 @@ export function Catalog() {
       <PageHeader
         eyebrow="Módulo 2"
         title="Catálogo"
-        description="Administra materiales, servicios, categorías y marcas para conectarlos con tus suplidores."
+        description="Administra materiales y servicios con categorías y subcategorías estandarizadas."
         actions={
           fromQuoteRequest || Boolean(draftQuery.data?.draft) ? (
             <Link
@@ -200,19 +221,26 @@ export function Catalog() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Categoría</span>
-                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={itemForm.categoryId ?? ""} onChange={(event) => updateItemField("categoryId", event.target.value)}>
+                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={itemForm.categoryId ?? ""} onChange={(event) => setItemForm((current) => ({ ...current, categoryId: event.target.value, subcategoryId: "" }))}>
                     <option value="">Sin categoría</option>
                     {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
                   </select>
                 </label>
                 <label className="block">
-                  <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Marca</span>
-                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={itemForm.brandId ?? ""} onChange={(event) => updateItemField("brandId", event.target.value)}>
-                    <option value="">Sin marca</option>
-                    {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+                  <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Subcategoría</span>
+                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={itemForm.subcategoryId ?? ""} onChange={(event) => updateItemField("subcategoryId", event.target.value)} disabled={!itemForm.categoryId}>
+                    <option value="">Sin subcategoría</option>
+                    {itemSubcategories.map((subcategory) => <option key={subcategory.id} value={subcategory.id}>{subcategory.name}</option>)}
                   </select>
                 </label>
               </div>
+              <label className="block">
+                <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Marca</span>
+                <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={itemForm.brandId ?? ""} onChange={(event) => updateItemField("brandId", event.target.value)}>
+                  <option value="">Sin marca</option>
+                  {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+                </select>
+              </label>
               <label className="block">
                 <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Descripción</span>
                 <Input value={itemForm.description ?? ""} onChange={(event) => updateItemField("description", event.target.value)} />
@@ -229,9 +257,9 @@ export function Catalog() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <h2 className="text-base font-bold text-ink">Categorías y marcas</h2>
+              <h2 className="text-base font-bold text-ink">Clasificación del catálogo</h2>
             </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 lg:grid-cols-3">
               <form
                 className="flex gap-2"
                 onSubmit={(event) => {
@@ -241,6 +269,22 @@ export function Catalog() {
               >
                 <Input placeholder="Nueva categoría" value={newCategory} onChange={(event) => setNewCategory(event.target.value)} />
                 <Button type="submit">Agregar</Button>
+              </form>
+              <form
+                className="grid gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  createSubcategoryMutation.mutate();
+                }}
+              >
+                <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={subcategoryCategoryId} onChange={(event) => setSubcategoryCategoryId(event.target.value)} required>
+                  <option value="">Categoría principal</option>
+                  {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                </select>
+                <div className="flex gap-2">
+                  <Input placeholder="Nueva subcategoría" value={newSubcategory} onChange={(event) => setNewSubcategory(event.target.value)} required />
+                  <Button type="submit">Agregar</Button>
+                </div>
               </form>
               <form
                 className="flex gap-2"
@@ -256,13 +300,16 @@ export function Catalog() {
                 {categories.map((category) => <Badge key={category.id}>{category.name}</Badge>)}
               </div>
               <div className="flex flex-wrap gap-2">
+                {subcategories.map((subcategory) => <Badge key={subcategory.id} tone="green">{subcategory.name}</Badge>)}
+              </div>
+              <div className="flex flex-wrap gap-2">
                 {brands.map((brand) => <Badge key={brand.id} tone="blue">{brand.name}</Badge>)}
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="grid gap-3 p-4 md:grid-cols-[1fr_160px_auto]">
+            <CardContent className="grid gap-3 p-4 lg:grid-cols-[1fr_140px_180px_180px_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input className="pl-9" placeholder="Buscar ítem, categoría o marca" value={filters.search ?? ""} onChange={(event) => updateFilter("search", event.target.value)} />
@@ -271,6 +318,14 @@ export function Catalog() {
                 <option value="">Todos</option>
                 <option value="MATERIAL">Material</option>
                 <option value="SERVICIO">Servicio</option>
+              </select>
+              <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={filters.categoryId ?? ""} onChange={(event) => setFilters((current) => ({ ...current, categoryId: event.target.value || undefined, subcategoryId: undefined }))}>
+                <option value="">Todas las categorías</option>
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+              <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={filters.subcategoryId ?? ""} onChange={(event) => updateFilter("subcategoryId", event.target.value)} disabled={!filters.categoryId}>
+                <option value="">Todas las subcategorías</option>
+                {subcategories.filter((subcategory) => subcategory.categoryId === filters.categoryId).map((subcategory) => <option key={subcategory.id} value={subcategory.id}>{subcategory.name}</option>)}
               </select>
               <Button type="button" variant="outline" onClick={() => setFilters({})}>
                 <RotateCcw className="h-4 w-4" />
@@ -294,7 +349,7 @@ export function Catalog() {
                   <p className="mt-1 text-sm text-slate-600">{item.description || item.unit || "Sin descripción"}</p>
                 </div>
                 <Badge tone={item.type === "MATERIAL" ? "green" : "blue"}>{item.type === "MATERIAL" ? "Material" : "Servicio"}</Badge>
-                <p className="text-sm text-slate-600">{item.category?.name || "Sin categoría"} · {item.brand?.name || "Sin marca"}</p>
+                <p className="text-sm text-slate-600">{item.category?.name || "Sin categoría"}{item.subcategory ? ` / ${item.subcategory.name}` : ""} · {item.brand?.name || "Sin marca"}</p>
                 <p className="text-sm font-semibold text-slate-600">{item.supplierCount} supl.</p>
                 <div className="flex items-center gap-2">
                   <Link to={`/catalog/${item.id}`}>

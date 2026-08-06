@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { Request } from "express";
 import multer from "multer";
 import { validate } from "../../middlewares/validate";
-import { authenticate } from "../auth/auth.middleware";
+import { authenticate, requirePermission } from "../auth/auth.middleware";
 import {
   createQuoteRequestSchema,
   createSupplierQuoteSchema,
@@ -90,7 +90,7 @@ quoteRequestRouter.get("/", validate({ query: listQuoteRequestsQuerySchema }), a
   }
 });
 
-quoteRequestRouter.post("/", upload.array("attachments", 8), async (req, res, next) => {
+quoteRequestRouter.post("/", requirePermission("purchases:write"), upload.array("attachments", 8), async (req, res, next) => {
   try {
     const parsed = parseCreatePayload(req);
     if (!parsed.success) {
@@ -119,7 +119,7 @@ quoteRequestRouter.get("/draft", async (req, res, next) => {
   }
 });
 
-quoteRequestRouter.put("/draft", validate({ body: quoteRequestDraftSchema }), async (req, res, next) => {
+quoteRequestRouter.put("/draft", requirePermission("purchases:write"), validate({ body: quoteRequestDraftSchema }), async (req, res, next) => {
   try {
     const draft = await saveQuoteRequestDraft(organizationId(req), authUserId(req), quoteRequestDraftSchema.parse(req.body));
     res.json({ draft });
@@ -128,7 +128,7 @@ quoteRequestRouter.put("/draft", validate({ body: quoteRequestDraftSchema }), as
   }
 });
 
-quoteRequestRouter.delete("/draft", async (req, res, next) => {
+quoteRequestRouter.delete("/draft", requirePermission("purchases:write"), async (req, res, next) => {
   try {
     await deleteQuoteRequestDraft(organizationId(req), authUserId(req));
     res.status(204).send();
@@ -149,6 +149,7 @@ quoteRequestRouter.get("/:id", validate({ params: quoteRequestIdParamsSchema }),
 
 quoteRequestRouter.post(
   "/:id/suppliers/:supplierId/email",
+  requirePermission("purchases:write"),
   validate({ params: quoteRequestSupplierParamsSchema }),
   async (req, res, next) => {
     try {
@@ -163,6 +164,7 @@ quoteRequestRouter.post(
 
 quoteRequestRouter.post(
   "/:id/quotes",
+  requirePermission("purchases:write"),
   validate({ params: quoteRequestIdParamsSchema }),
   upload.single("file"),
   async (req, res, next) => {

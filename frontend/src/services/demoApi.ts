@@ -12,8 +12,10 @@ import type {
   CatalogItem,
   CatalogItemDetailResponse,
   CatalogItemPayload,
+  CatalogSubcategory,
   HealthResponse,
   OrganizationWorkspaceResponse,
+  AuditLog,
   PriceHistoryResponse,
   PricePoint,
   PurchaseOrder,
@@ -34,6 +36,7 @@ import type {
   SupplierQuoteLine,
   SupportTicket,
   UnitOfMeasure,
+  Warehouse,
 } from "./api";
 
 export const demoToken = "smart-source-static-demo-token";
@@ -76,6 +79,13 @@ const categories: CatalogEntity[] = [
   { id: "cat_office", name: "Oficina" },
   { id: "cat_tech", name: "Tecnología" },
   { id: "cat_services", name: "Servicios" },
+];
+
+const subcategories: CatalogSubcategory[] = [
+  { id: "sub_concrete", categoryId: "cat_construction", name: "HORMIGÓN Y CEMENTO", category: categories[0] },
+  { id: "sub_wiring", categoryId: "cat_electrical", name: "CABLEADO", category: categories[1] },
+  { id: "sub_computers", categoryId: "cat_tech", name: "COMPUTADORAS", category: categories[3] },
+  { id: "sub_maintenance", categoryId: "cat_services", name: "MANTENIMIENTO", category: categories[4] },
 ];
 
 const brands: CatalogEntity[] = [
@@ -356,6 +366,41 @@ let supportTickets: SupportTicket[] = [
   },
 ];
 
+let warehouses: Warehouse[] = [
+  {
+    id: "warehouse_general",
+    name: "ALMACÉN GENERAL",
+    code: "AG-01",
+    type: "GENERAL",
+    project: null,
+    location: "SEDE PRINCIPAL",
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+    balances: [
+      { id: "balance_cable", itemId: "item_cable", quantity: "120.00", item: catalogItems[1] },
+      { id: "balance_stationery", itemId: "item_stationery", quantity: "3.00", item: catalogItems[3] },
+    ],
+    movements: [],
+    _count: { balances: 2, movements: 2, purchaseOrders: 2 },
+  },
+];
+
+let auditLogs: AuditLog[] = [
+  {
+    id: "audit_demo",
+    action: "CREATE",
+    entityType: "ORGANIZATION",
+    entityId: organization.id,
+    summary: "Creó el espacio de trabajo de demostración",
+    before: null,
+    after: { name: organization.name },
+    metadata: null,
+    createdAt: now,
+    user: { id: demoUser.id, name: demoUser.name, email: demoUser.email },
+  },
+];
+
 let aiDocuments: AiDocumentDetail[] = [
   {
     id: "ai_demo_doc",
@@ -420,7 +465,7 @@ export const demoApi = {
       id,
       name: payload.name,
       rnc: payload.rnc || null,
-      category: payload.category || null,
+      category: null,
       city: payload.city || null,
       address: payload.address || null,
       phone: payload.phone || null,
@@ -463,7 +508,7 @@ export const demoApi = {
     Object.assign(current, {
       name: payload.name,
       rnc: payload.rnc || null,
-      category: payload.category || null,
+      category: current.category,
       city: payload.city || null,
       address: payload.address || null,
       phone: payload.phone || null,
@@ -482,12 +527,18 @@ export const demoApi = {
     suppliers = suppliers.map((supplier) => (supplier.id === id ? { ...supplier, isActive: false } : supplier));
     return ok(undefined);
   },
+  restoreSupplier: (id: string) => {
+    suppliers = suppliers.map((supplier) => (supplier.id === id ? { ...supplier, isActive: true } : supplier));
+    return ok(undefined);
+  },
   listCatalogItems: (filters: CatalogFilters = {}) =>
     ok({ items: catalogItems.filter((item) => itemMatches(item, filters)) }),
   getCatalogItemDetail: (id: string) => ok(catalogDetail(id)),
   createCatalogItem: (payload: CatalogItemPayload) => {
     const item = makeItem(`item_${Date.now()}`, payload.name, payload.type, payload.unit ?? null, payload.categoryId ?? null, payload.brandId ?? null, 0);
     item.description = payload.description || null;
+    item.subcategoryId = payload.subcategoryId ?? null;
+    item.subcategory = subcategories.find((entry) => entry.id === payload.subcategoryId) ?? null;
     catalogItems = [item, ...catalogItems];
     return ok({ item });
   },
@@ -498,8 +549,10 @@ export const demoApi = {
       type: payload.type,
       unit: payload.unit || null,
       categoryId: payload.categoryId || null,
+      subcategoryId: payload.subcategoryId || null,
       brandId: payload.brandId || null,
       category: categories.find((category) => category.id === payload.categoryId) ?? null,
+      subcategory: subcategories.find((subcategory) => subcategory.id === payload.subcategoryId) ?? null,
       brand: brands.find((brand) => brand.id === payload.brandId) ?? null,
       description: payload.description || null,
     });
@@ -509,11 +562,23 @@ export const demoApi = {
     catalogItems = catalogItems.filter((item) => item.id !== id);
     return ok(undefined);
   },
+  restoreCatalogItem: (_id: string) => ok(undefined),
   listCategories: () => ok({ categories }),
   createCategory: (name: string) => {
     const category = { id: `cat_${Date.now()}`, name };
     categories.push(category);
     return ok({ category });
+  },
+  listSubcategories: (categoryId?: string) => ok({ subcategories: subcategories.filter((entry) => !categoryId || entry.categoryId === categoryId) }),
+  createSubcategory: (payload: { categoryId: string; name: string }) => {
+    const subcategory: CatalogSubcategory = {
+      id: `sub_${Date.now()}`,
+      categoryId: payload.categoryId,
+      name: payload.name.toLocaleUpperCase("es"),
+      category: categories.find((entry) => entry.id === payload.categoryId),
+    };
+    subcategories.push(subcategory);
+    return ok({ subcategory });
   },
   listBrands: () => ok({ brands }),
   createBrand: (name: string) => {
@@ -532,7 +597,23 @@ export const demoApi = {
     units = [...units, unit].sort((left, right) => left.name.localeCompare(right.name, "es"));
     return ok({ unit });
   },
-  listSupportTickets: () => ok({ tickets: supportTickets }),
+  listSupportTickets: (group: "ALL" | "OPEN" | "CLOSED" | "STANDBY" = "ALL") => ok({
+    tickets: supportTickets.filter((ticket) =>
+      group === "ALL"
+        ? true
+        : group === "OPEN"
+          ? ["ABIERTO", "EN_REVISION"].includes(ticket.status)
+          : group === "CLOSED"
+            ? ["RESUELTO", "CERRADO"].includes(ticket.status)
+            : ticket.status === "EN_ESPERA",
+    ),
+  }),
+  updateSupportTicketStatus: (id: string, status: SupportTicket["status"]) => {
+    const ticket = supportTickets.find((entry) => entry.id === id) ?? supportTickets[0];
+    ticket.status = status;
+    ticket.updatedAt = new Date().toISOString();
+    return ok({ ticket });
+  },
   createSupportTicket: (payload: { subject: string; category: string; priority: string; message: string }) => {
     const ticket: SupportTicket = {
       id: `ticket_${Date.now()}`,
@@ -557,9 +638,16 @@ export const demoApi = {
     purchaseOrders = [order, ...purchaseOrders];
     return ok({ order });
   },
-  updatePurchaseOrderStatus: (id: string, status: PurchaseOrder["status"]) => {
+  updatePurchaseOrderStatus: (id: string, status: PurchaseOrder["status"], warehouseId?: string) => {
     const order = purchaseOrders.find((entry) => entry.id === id) ?? purchaseOrders[0];
     order.status = status;
+    if (status === "RECIBIDA" && warehouseId) {
+      const warehouse = warehouses.find((entry) => entry.id === warehouseId) ?? warehouses[0];
+      order.warehouseId = warehouse.id;
+      order.warehouse = warehouse;
+      order.receivedAt = new Date().toISOString();
+      order.receivedBy = { id: demoUser.id, name: demoUser.name };
+    }
     return ok({ order });
   },
   listQuoteRequests: (filters: QuoteRequestFilters = {}) =>
@@ -769,10 +857,63 @@ export const demoApi = {
           supportTickets: supportTickets.length,
           orders: purchaseOrders.length,
           openTickets: supportTickets.filter((ticket) => ticket.status === "ABIERTO").length,
+          warehouses: warehouses.length,
         },
       },
       users: [{ id: demoUser.id, name: demoUser.name, email: demoUser.email, role: demoUser.role, isActive: true, lastLoginAt: now, createdAt: now }],
     }),
+  listAuditLogs: (limit: number) => ok({ logs: auditLogs.slice(0, limit) }),
+  updateOrganizationUser: (_userId: string, payload: { role: string; isActive?: boolean }) => {
+    demoUser.role = payload.role;
+    return ok({ user: { id: demoUser.id, name: demoUser.name, email: demoUser.email, role: demoUser.role, isActive: payload.isActive ?? true, lastLoginAt: now, createdAt: now } });
+  },
+  listWarehouses: () => ok({ warehouses }),
+  createWarehouse: (payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; project?: string; location?: string }) => {
+    const warehouse: Warehouse = {
+      id: `warehouse_${Date.now()}`,
+      name: payload.name.toLocaleUpperCase("es"),
+      code: payload.code.toLocaleUpperCase("es"),
+      type: payload.type,
+      project: payload.project?.toLocaleUpperCase("es") ?? null,
+      location: payload.location?.toLocaleUpperCase("es") ?? null,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      balances: [],
+      movements: [],
+      _count: { balances: 0, movements: 0, purchaseOrders: 0 },
+    };
+    warehouses = [...warehouses, warehouse];
+    return ok({ warehouse });
+  },
+  createInventoryMovement: (warehouseId: string, payload: { itemId: string; type: "SALIDA" | "AJUSTE"; quantity: number; unit?: string; reference?: string; notes?: string }) => {
+    const warehouse = warehouses.find((entry) => entry.id === warehouseId) ?? warehouses[0];
+    const item = catalogItems.find((entry) => entry.id === payload.itemId) ?? catalogItems[0];
+    let balance = warehouse.balances.find((entry) => entry.itemId === item.id);
+    if (!balance) {
+      balance = { id: `balance_${Date.now()}`, itemId: item.id, quantity: "0.00", item };
+      warehouse.balances.push(balance);
+    }
+    const delta = payload.type === "SALIDA" ? -Math.abs(payload.quantity) : payload.quantity;
+    balance.quantity = Math.max(0, Number(balance.quantity) + delta).toFixed(2);
+    const movement = {
+      id: `movement_${Date.now()}`,
+      warehouseId: warehouse.id,
+      itemId: item.id,
+      orderId: null,
+      type: payload.type,
+      quantity: Math.abs(payload.quantity).toFixed(2),
+      unit: payload.unit ?? item.unit,
+      reference: payload.reference ?? null,
+      notes: payload.notes ?? null,
+      createdAt: new Date().toISOString(),
+      item: { id: item.id, name: item.name, unit: item.unit },
+      createdBy: { id: demoUser.id, name: demoUser.name },
+      order: null,
+    };
+    warehouse.movements = [movement, ...warehouse.movements];
+    return ok({ balance, movement });
+  },
   getAdminOverview: () =>
     ok<{ overview: AdminOverview }>({
       overview: { organizations: 2, users: 3, suppliers: suppliers.length, openTickets: supportTickets.length },
@@ -821,8 +962,10 @@ function makeItem(
     unit,
     description: null,
     categoryId,
+    subcategoryId: null,
     brandId,
     category: categories.find((category) => category.id === categoryId) ?? null,
+    subcategory: null,
     brand: brands.find((brand) => brand.id === brandId) ?? null,
     supplierCount,
   };
@@ -842,6 +985,11 @@ function makeOrder(
     id,
     number,
     supplierId,
+    organizationId: organization.id,
+    quoteRequestId: null,
+    warehouseId: null,
+    receivedAt: null,
+    costCenter: null,
     status,
     issueDate: now,
     currency: "DOP",
@@ -850,6 +998,9 @@ function makeOrder(
     total: (subtotal + tax).toFixed(2),
     notes: null,
     supplier: pickSupplier(supplier),
+    warehouse: null,
+    quoteRequest: null,
+    receivedBy: null,
     lines: lines.map((line, index) => {
       const item = catalogItems.find((entry) => entry.id === line.itemId) ?? catalogItems[0];
       return {
@@ -1169,6 +1320,7 @@ function itemMatches(item: CatalogItem, filters: CatalogFilters) {
     (!search || item.name.toLowerCase().includes(search)) &&
     (!filters.type || item.type === filters.type) &&
     (!filters.categoryId || item.categoryId === filters.categoryId) &&
+    (!filters.subcategoryId || item.subcategoryId === filters.subcategoryId) &&
     (!filters.brandId || item.brandId === filters.brandId)
   );
 }

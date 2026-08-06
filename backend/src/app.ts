@@ -5,7 +5,7 @@ import { errorHandler, notFoundHandler } from "./middlewares/errorHandler";
 import { aiConsultRouter } from "./modules/ai-consult/aiConsult.routes";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { authRouter } from "./modules/auth/auth.routes";
-import { brandRouter, categoryRouter, itemRouter, tagRouter, unitRouter } from "./modules/catalog/catalog.routes";
+import { brandRouter, categoryRouter, itemRouter, subcategoryRouter, tagRouter, unitRouter } from "./modules/catalog/catalog.routes";
 import { contactRouter } from "./modules/contacts/contact.routes";
 import { organizationRouter } from "./modules/organizations/organization.routes";
 import { priceHistoryRouter } from "./modules/price-history/priceHistory.routes";
@@ -15,6 +15,7 @@ import { reportRouter } from "./modules/reports/report.routes";
 import { searchRouter } from "./modules/search/search.routes";
 import { supplierRouter } from "./modules/suppliers/supplier.routes";
 import { supportRouter } from "./modules/support/support.routes";
+import { warehouseRouter } from "./modules/warehouses/warehouse.routes";
 
 export const app = express();
 
@@ -40,6 +41,7 @@ app.use("/api/contacts", contactRouter);
 app.use("/api/organizations", organizationRouter);
 app.use("/api/items", itemRouter);
 app.use("/api/categories", categoryRouter);
+app.use("/api/subcategories", subcategoryRouter);
 app.use("/api/brands", brandRouter);
 app.use("/api/units", unitRouter);
 app.use("/api/tags", tagRouter);
@@ -49,6 +51,7 @@ app.use("/api/quote-requests", quoteRequestRouter);
 app.use("/api/price-history", priceHistoryRouter);
 app.use("/api/reports", reportRouter);
 app.use("/api/support", supportRouter);
+app.use("/api/warehouses", warehouseRouter);
 app.use("/api/ai-consult", aiConsultRouter);
 
 app.use(notFoundHandler);

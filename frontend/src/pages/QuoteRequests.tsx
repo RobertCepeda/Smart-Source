@@ -165,6 +165,8 @@ export function QuoteRequests() {
       queryClient.setQueryData(["quote-request-draft"], { draft: null });
     },
   });
+  const saveDraft = saveDraftMutation.mutate;
+  const deleteDraft = deleteDraftMutation.mutate;
 
   const createUnitMutation = useMutation({
     mutationFn: (name: string) => createUnitRequest(token!, { name }),
@@ -231,18 +233,18 @@ export function QuoteRequests() {
     const timeout = window.setTimeout(() => {
       if (!hasDraftContent(draftPayload)) {
         if (draftUpdatedAtRef.current) {
-          deleteDraftMutation.mutate();
+          deleteDraft();
         } else {
           setDraftUpdatedAt(null);
         }
         return;
       }
 
-      saveDraftMutation.mutate(draftPayload);
+      saveDraft(draftPayload);
     }, 300);
 
     return () => window.clearTimeout(timeout);
-  }, [costCenter, deadline, draftHydrated, lines, observations, project, requesterName, selectedSupplierIds]);
+  }, [costCenter, deadline, deleteDraft, draftHydrated, lines, observations, project, requesterName, saveDraft, selectedSupplierIds]);
 
   useEffect(
     () => () => {

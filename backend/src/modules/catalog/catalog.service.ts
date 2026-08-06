@@ -1,5 +1,6 @@
 import { prisma } from "../../lib/prisma";
-import type { createItemSchema, createNamedEntitySchema, createUnitSchema, listItemsQuerySchema, updateItemSchema } from "./catalog.schema";
+import { recordAudit } from "../../lib/audit";
+import type { createItemSchema, createNamedEntitySchema, createSubcategorySchema, createUnitSchema, listItemsQuerySchema, listSubcategoriesQuerySchema, updateItemSchema } from "./catalog.schema";
 import type { z } from "zod";
 
 type ListItemsQuery = z.infer<typeof listItemsQuerySchema>;
@@ -7,10 +8,16 @@ type CreateItemInput = z.infer<typeof createItemSchema>;
 type UpdateItemInput = z.infer<typeof updateItemSchema>;
 type NamedEntityInput = z.infer<typeof createNamedEntitySchema>;
 type CreateUnitInput = z.infer<typeof createUnitSchema>;
+type CreateSubcategoryInput = z.infer<typeof createSubcategorySchema>;
+type ListSubcategoriesQuery = z.infer<typeof listSubcategoriesQuerySchema>;
 
 function cleanString(value?: string | null) {
   const cleaned = value?.trim();
   return cleaned ? cleaned : undefined;
+}
+
+function upperString(value?: string | null) {
+  return cleanString(value)?.toLocaleUpperCase("es");
 }
 
 function normalizeUnit(value: string) {
@@ -37,6 +44,26 @@ async function ensureUnit(organizationId: string, name?: string | null, abbrevia
   });
 }
 
+async function validateSubcategory(organizationId: string, categoryId?: string | null, subcategoryId?: string | null) {
+  if (!subcategoryId) {
+    return;
+  }
+
+  const validSubcategory = await prisma.subcategory.findFirst({
+    where: {
+      id: subcategoryId,
+      organizationId,
+      ...(categoryId ? { categoryId } : {}),
+    },
+  });
+
+  if (!validSubcategory) {
+    const error = new Error("La subcategoría no pertenece a la categoría seleccionada.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+}
+
 function mapItem(item: any) {
   return {
     id: item.id,
@@ -45,8 +72,10 @@ function mapItem(item: any) {
     unit: item.unit,
     description: item.description,
     categoryId: item.categoryId,
+    subcategoryId: item.subcategoryId,
     brandId: item.brandId,
     category: item.category,
+    subcategory: item.subcategory,
     brand: item.brand,
     supplierCount: item.suppliers?.length ?? 0,
   };
@@ -57,6 +86,7 @@ async function ensureItem(organizationId: string, id: string) {
     where: { id, organizationId, isActive: true },
     include: {
       category: true,
+      subcategory: true,
       brand: true,
       suppliers: {
         include: {
@@ -123,6 +153,7 @@ export async function listItems(organizationId: string, query: ListItemsQuery) {
       isActive: true,
       ...(query.type ? { type: query.type } : {}),
       ...(cleanString(query.categoryId) ? { categoryId: query.categoryId } : {}),
+      ...(cleanString(query.subcategoryId) ? { subcategoryId: query.subcategoryId } : {}),
       ...(cleanString(query.brandId) ? { brandId: query.brandId } : {}),
       ...(search
         ? {
@@ -130,12 +161,13 @@ export async function listItems(organizationId: string, query: ListItemsQuery) {
               { name: { contains: search, mode: "insensitive" as const } },
               { description: { contains: search, mode: "insensitive" as const } },
               { category: { name: { contains: search, mode: "insensitive" as const } } },
+              { subcategory: { name: { contains: search, mode: "insensitive" as const } } },
               { brand: { name: { contains: search, mode: "insensitive" as const } } },
             ],
           }
         : {}),
     },
-    include: { category: true, brand: true, suppliers: true },
+    include: { category: true, subcategory: true, brand: true, suppliers: true },
     orderBy: { name: "asc" },
   });
 
@@ -246,48 +278,72 @@ export async function getItemDetail(organizationId: string, id: string) {
   };
 }
 
-export async function createItem(organizationId: string, input: CreateItemInput) {
+export async function createItem(organizationId: string, actorId: string, input: CreateItemInput) {
   await ensureUnit(organizationId, input.unit);
+  await validateSubcategory(organizationId, input.categoryId, input.subcategoryId);
 
   const item = await prisma.item.create({
     data: {
       organizationId,
-      name: input.name.trim(),
+      name: upperString(input.name)!,
       type: input.type,
       unit: cleanString(input.unit),
       categoryId: cleanString(input.categoryId),
+      subcategoryId: cleanString(input.subcategoryId),
       brandId: cleanString(input.brandId),
-      description: cleanString(input.description),
+      description: upperString(input.description),
     },
-    include: { category: true, brand: true, suppliers: true },
+    include: { category: true, subcategory: true, brand: true, suppliers: true },
   });
+
+  await recordAudit({ organizationId, userId: actorId, action: "CREATE", entityType: "ITEM", entityId: item.id, summary: `Creó el ítem ${item.name}`, after: item });
 
   return mapItem(item);
 }
 
-export async function updateItem(organizationId: string, id: string, input: UpdateItemInput) {
-  await ensureItem(organizationId, id);
+export async function updateItem(organizationId: string, actorId: string, id: string, input: UpdateItemInput) {
+  const previous = await ensureItem(organizationId, id);
   await ensureUnit(organizationId, input.unit);
+  await validateSubcategory(
+    organizationId,
+    input.categoryId === undefined ? previous.categoryId : input.categoryId,
+    input.subcategoryId === undefined ? previous.subcategoryId : input.subcategoryId,
+  );
 
   const item = await prisma.item.update({
     where: { id },
     data: {
-      name: cleanString(input.name),
+      name: upperString(input.name),
       type: input.type,
       unit: cleanString(input.unit),
       categoryId: cleanString(input.categoryId),
+      subcategoryId: cleanString(input.subcategoryId),
       brandId: cleanString(input.brandId),
-      description: cleanString(input.description),
+      description: upperString(input.description),
     },
-    include: { category: true, brand: true, suppliers: true },
+    include: { category: true, subcategory: true, brand: true, suppliers: true },
   });
+
+  await recordAudit({ organizationId, userId: actorId, action: "UPDATE", entityType: "ITEM", entityId: id, summary: `Actualizó el ítem ${item.name}`, before: previous, after: item });
 
   return mapItem(item);
 }
 
-export async function deactivateItem(organizationId: string, id: string) {
-  await ensureItem(organizationId, id);
-  await prisma.item.update({ where: { id }, data: { isActive: false } });
+export async function deactivateItem(organizationId: string, actorId: string, id: string) {
+  const previous = await ensureItem(organizationId, id);
+  await prisma.item.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
+  await recordAudit({ organizationId, userId: actorId, action: "DELETE", entityType: "ITEM", entityId: id, summary: `Eliminó el ítem ${previous.name}`, before: previous, metadata: { restorable: true } });
+}
+
+export async function restoreItem(organizationId: string, actorId: string, id: string) {
+  const item = await prisma.item.findFirst({ where: { id, organizationId, isActive: false } });
+  if (!item) {
+    const error = new Error("No se encontró un ítem eliminado para restaurar.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+  const restored = await prisma.item.update({ where: { id }, data: { isActive: true, deletedAt: null } });
+  await recordAudit({ organizationId, userId: actorId, action: "RESTORE", entityType: "ITEM", entityId: id, summary: `Restauró el ítem ${restored.name}`, after: restored });
 }
 
 export async function listCategories(organizationId: string) {
@@ -297,12 +353,41 @@ export async function listCategories(organizationId: string) {
   });
 }
 
-export async function createCategory(organizationId: string, input: NamedEntityInput) {
-  return prisma.category.upsert({
-    where: { organizationId_name: { organizationId, name: input.name.trim() } },
+export async function createCategory(organizationId: string, actorId: string, input: NamedEntityInput) {
+  const name = upperString(input.name)!;
+  const category = await prisma.category.upsert({
+    where: { organizationId_name: { organizationId, name } },
     update: {},
-    create: { organizationId, name: input.name.trim() },
+    create: { organizationId, name },
   });
+  await recordAudit({ organizationId, userId: actorId, action: "CREATE", entityType: "CATEGORY", entityId: category.id, summary: `Registró la categoría ${category.name}`, after: category });
+  return category;
+}
+
+export async function listSubcategories(organizationId: string, query: ListSubcategoriesQuery) {
+  return prisma.subcategory.findMany({
+    where: { organizationId, ...(query.categoryId ? { categoryId: query.categoryId } : {}) },
+    include: { category: { select: { id: true, name: true } } },
+    orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
+  });
+}
+
+export async function createSubcategory(organizationId: string, actorId: string, input: CreateSubcategoryInput) {
+  const category = await prisma.category.findFirst({ where: { id: input.categoryId, organizationId } });
+  if (!category) {
+    const error = new Error("Selecciona una categoría válida.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+  const name = upperString(input.name)!;
+  const subcategory = await prisma.subcategory.upsert({
+    where: { organizationId_categoryId_name: { organizationId, categoryId: input.categoryId, name } },
+    update: {},
+    create: { organizationId, categoryId: input.categoryId, name },
+    include: { category: { select: { id: true, name: true } } },
+  });
+  await recordAudit({ organizationId, userId: actorId, action: "CREATE", entityType: "SUBCATEGORY", entityId: subcategory.id, summary: `Creó la subcategoría ${subcategory.name}`, after: subcategory });
+  return subcategory;
 }
 
 export async function listBrands(organizationId: string) {
@@ -312,12 +397,15 @@ export async function listBrands(organizationId: string) {
   });
 }
 
-export async function createBrand(organizationId: string, input: NamedEntityInput) {
-  return prisma.brand.upsert({
-    where: { organizationId_name: { organizationId, name: input.name.trim() } },
+export async function createBrand(organizationId: string, actorId: string, input: NamedEntityInput) {
+  const name = upperString(input.name)!;
+  const brand = await prisma.brand.upsert({
+    where: { organizationId_name: { organizationId, name } },
     update: {},
-    create: { organizationId, name: input.name.trim() },
+    create: { organizationId, name },
   });
+  await recordAudit({ organizationId, userId: actorId, action: "CREATE", entityType: "BRAND", entityId: brand.id, summary: `Registró la marca ${brand.name}`, after: brand });
+  return brand;
 }
 
 export async function listUnits(organizationId: string) {
@@ -356,8 +444,20 @@ export async function listUnits(organizationId: string) {
   return [...units, ...inferredUnits].sort((left, right) => left.name.localeCompare(right.name, "es"));
 }
 
-export async function createUnit(organizationId: string, input: CreateUnitInput) {
-  return ensureUnit(organizationId, input.name, input.abbreviation);
+export async function createUnit(organizationId: string, actorId: string, input: CreateUnitInput) {
+  const unit = await ensureUnit(organizationId, input.name, input.abbreviation);
+  if (unit) {
+    await recordAudit({
+      organizationId,
+      userId: actorId,
+      action: "CREATE",
+      entityType: "UNIT",
+      entityId: unit.id,
+      summary: `Registró la unidad ${unit.name}`,
+      after: unit,
+    });
+  }
+  return unit;
 }
 
 export async function listTags() {

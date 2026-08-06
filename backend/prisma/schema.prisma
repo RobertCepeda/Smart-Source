@@ -8,56 +8,66 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  organizationId String?
-  name         String
-  email        String       @unique
-  passwordHash String?
-  company      String?
-  avatarUrl    String?
-  role         UserRole     @default(CLIENT)
-  authProvider AuthProvider @default(EMAIL)
-  googleId     String?      @unique
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  lastLoginAt  DateTime?
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  supportMessages SupportMessage[]
-  requestedTickets SupportTicket[] @relation("TicketRequester")
-  aiChats AiChat[]
-  aiDocuments AiDocument[]
-  aiQuestions AiQuestion[]
-  quoteRequests QuoteRequest[]
+  id                 String              @id @default(cuid())
+  organizationId     String?
+  name               String
+  email              String              @unique
+  passwordHash       String?
+  company            String?
+  avatarUrl          String?
+  role               UserRole            @default(CLIENT)
+  authProvider       AuthProvider        @default(EMAIL)
+  googleId           String?             @unique
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  lastLoginAt        DateTime?
+  failedLoginAttempts Int                @default(0)
+  lockedUntil        DateTime?
+  organization       Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  supportMessages    SupportMessage[]
+  requestedTickets   SupportTicket[]     @relation("TicketRequester")
+  aiChats            AiChat[]
+  aiDocuments        AiDocument[]
+  aiQuestions        AiQuestion[]
+  quoteRequests      QuoteRequest[]
   quoteRequestDrafts QuoteRequestDraft[]
+  auditLogs          AuditLog[]
+  inventoryMovements InventoryMovement[]
+  receivedOrders     PurchaseOrder[]     @relation("OrderReceiver")
 
   @@index([email])
   @@index([organizationId])
 }
 
 model Organization {
-  id          String             @id @default(cuid())
-  name        String
-  slug        String             @unique
+  id           String             @id @default(cuid())
+  name         String
+  slug         String             @unique
   billingEmail String?
-  status      OrganizationStatus @default(ACTIVE)
-  accountType AccountType        @default(PERSONAL)
-  plan        String             @default("STARTER")
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  status       OrganizationStatus @default(ACTIVE)
+  accountType  AccountType        @default(PERSONAL)
+  plan         String             @default("STARTER")
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
-  users       User[]
-  suppliers   Supplier[]
-  categories  Category[]
-  brands      Brand[]
-  units       UnitOfMeasure[]
-  items       Item[]
-  supportTickets SupportTicket[]
-  aiChats AiChat[]
-  aiDocuments AiDocument[]
-  aiProductAliases AiProductAlias[]
-  quoteRequests QuoteRequest[]
+  users              User[]
+  suppliers          Supplier[]
+  categories         Category[]
+  subcategories      Subcategory[]
+  brands             Brand[]
+  units              UnitOfMeasure[]
+  items              Item[]
+  supportTickets     SupportTicket[]
+  aiChats            AiChat[]
+  aiDocuments        AiDocument[]
+  aiProductAliases   AiProductAlias[]
+  quoteRequests      QuoteRequest[]
   quoteRequestDrafts QuoteRequestDraft[]
+  purchaseOrders     PurchaseOrder[]
+  warehouses         Warehouse[]
+  inventoryMovements InventoryMovement[]
+  auditLogs          AuditLog[]
 
   @@index([name])
 }
@@ -75,7 +85,12 @@ enum OrganizationStatus {
 
 enum UserRole {
   SYSTEM_ADMIN
+  OWNER
   ADMIN
+  MANAGER
+  BUYER
+  WAREHOUSE
+  VIEWER
   CLIENT
 }
 
@@ -85,34 +100,35 @@ enum AuthProvider {
 }
 
 model Supplier {
-  id           String         @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String?
-  name         String
-  rnc          String?
-  category     String?
-  city         String?
-  address      String?
-  phone        String?
-  whatsapp     String?
-  email        String?
-  website      String?
-  instagram    String?
-  facebook     String?
-  notes        String?
-  rating       Int?           @default(0)
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  name           String
+  rnc            String?
+  category       String?
+  city           String?
+  address        String?
+  phone          String?
+  whatsapp       String?
+  email          String?
+  website        String?
+  instagram      String?
+  facebook       String?
+  notes          String?
+  rating         Int?      @default(0)
+  isActive       Boolean   @default(true)
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  contacts     Contact[]
-  items        SupplierItem[]
-  tags         SupplierTag[]
-  orders       PurchaseOrder[]
-  priceHistory PriceHistory[]
+  contacts              Contact[]
+  items                 SupplierItem[]
+  tags                  SupplierTag[]
+  orders                PurchaseOrder[]
+  priceHistory          PriceHistory[]
   quoteRequestSuppliers QuoteRequestSupplier[]
   quoteRequestEmailLogs QuoteRequestEmailLog[]
-  supplierQuotes SupplierQuote[]
-  organization Organization?  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplierQuotes        SupplierQuote[]
+  organization          Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([name])
   @@index([city])
@@ -131,9 +147,9 @@ model SupportTicket {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  requester      User?               @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: SetNull)
-  messages       SupportMessage[]
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requester    User?            @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  messages     SupportMessage[]
 
   @@index([organizationId])
   @@index([requesterId])
@@ -141,15 +157,15 @@ model SupportTicket {
 }
 
 model SupportMessage {
-  id        String              @id @default(cuid())
-  ticketId  String
-  authorId  String?
+  id         String            @id @default(cuid())
+  ticketId   String
+  authorId   String?
   authorType SupportAuthorType
-  body      String
-  createdAt DateTime            @default(now())
+  body       String
+  createdAt  DateTime          @default(now())
 
-  ticket    SupportTicket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  author    User?               @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User?         @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
   @@index([ticketId])
   @@index([authorId])
@@ -171,6 +187,7 @@ enum SupportPriority {
 enum SupportTicketStatus {
   ABIERTO
   EN_REVISION
+  EN_ESPERA
   RESUELTO
   CERRADO
 }
@@ -197,37 +214,52 @@ model Contact {
 }
 
 model Category {
-  id    String @id @default(cuid())
+  id             String        @id @default(cuid())
   organizationId String?
-  name  String
-  items Item[]
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  items          Item[]
+  subcategories  Subcategory[]
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, name])
   @@index([organizationId])
 }
 
+model Subcategory {
+  id             String       @id @default(cuid())
+  organizationId String
+  categoryId     String
+  name           String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category       Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  items          Item[]
+
+  @@unique([organizationId, categoryId, name])
+  @@index([organizationId])
+  @@index([categoryId])
+}
+
 model Brand {
-  id    String @id @default(cuid())
+  id             String        @id @default(cuid())
   organizationId String?
-  name  String
-  items Item[]
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  items          Item[]
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, name])
   @@index([organizationId])
 }
 
 model UnitOfMeasure {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   name           String
   abbreviation   String?
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -235,25 +267,31 @@ model UnitOfMeasure {
 }
 
 model Item {
-  id           String              @id @default(cuid())
-  organizationId String?
-  name         String
-  type         ItemType
-  unit         String?
-  categoryId   String?
-  brandId      String?
-  description  String?
-  category     Category?           @relation(fields: [categoryId], references: [id])
-  brand        Brand?              @relation(fields: [brandId], references: [id])
-  organization Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  suppliers    SupplierItem[]
-  orderLines   PurchaseOrderLine[]
-  priceHistory PriceHistory[]
-  isActive     Boolean             @default(true)
+  id                 String              @id @default(cuid())
+  organizationId     String?
+  name               String
+  type               ItemType
+  unit               String?
+  categoryId         String?
+  subcategoryId      String?
+  brandId            String?
+  description        String?
+  category           Category?           @relation(fields: [categoryId], references: [id])
+  subcategory        Subcategory?        @relation(fields: [subcategoryId], references: [id])
+  brand              Brand?              @relation(fields: [brandId], references: [id])
+  organization       Organization?       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  suppliers          SupplierItem[]
+  orderLines         PurchaseOrderLine[]
+  priceHistory       PriceHistory[]
+  inventoryBalances  InventoryBalance[]
+  inventoryMovements InventoryMovement[]
+  isActive           Boolean             @default(true)
+  deletedAt          DateTime?
 
   @@index([name])
   @@index([type])
   @@index([organizationId])
+  @@index([subcategoryId])
 }
 
 enum ItemType {
@@ -289,20 +327,34 @@ model SupplierTag {
 }
 
 model PurchaseOrder {
-  id         String              @id @default(cuid())
-  number     String              @unique
-  supplierId String
-  status     OrderStatus         @default(BORRADOR)
-  issueDate  DateTime            @default(now())
-  currency   String              @default("DOP")
-  subtotal   Decimal             @default(0) @db.Decimal(12, 2)
-  tax        Decimal             @default(0) @db.Decimal(12, 2)
-  total      Decimal             @default(0) @db.Decimal(12, 2)
-  notes      String?
-  supplier   Supplier            @relation(fields: [supplierId], references: [id])
-  lines      PurchaseOrderLine[]
+  id                 String              @id @default(cuid())
+  organizationId     String
+  number             String              @unique
+  supplierId         String
+  quoteRequestId     String?
+  warehouseId        String?
+  receivedById       String?
+  status             OrderStatus         @default(BORRADOR)
+  issueDate          DateTime            @default(now())
+  receivedAt         DateTime?
+  costCenter         String?
+  currency           String              @default("DOP")
+  subtotal           Decimal             @default(0) @db.Decimal(12, 2)
+  tax                Decimal             @default(0) @db.Decimal(12, 2)
+  total              Decimal             @default(0) @db.Decimal(12, 2)
+  notes              String?
+  supplier           Supplier            @relation(fields: [supplierId], references: [id])
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  quoteRequest       QuoteRequest?       @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
+  warehouse          Warehouse?          @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  receivedBy         User?               @relation("OrderReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
+  lines              PurchaseOrderLine[]
+  inventoryMovements InventoryMovement[]
 
+  @@index([organizationId])
   @@index([supplierId])
+  @@index([quoteRequestId])
+  @@index([warehouseId])
   @@index([status])
   @@index([issueDate])
 }
@@ -328,13 +380,14 @@ model QuoteRequest {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  requester      User?              @relation(fields: [requesterId], references: [id], onDelete: SetNull)
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requester      User?                    @relation(fields: [requesterId], references: [id], onDelete: SetNull)
   items          QuoteRequestItem[]
   attachments    QuoteRequestAttachment[]
   suppliers      QuoteRequestSupplier[]
   emailLogs      QuoteRequestEmailLog[]
   quotes         SupplierQuote[]
+  purchaseOrders PurchaseOrder[]
 
   @@index([organizationId])
   @@index([requesterId])
@@ -345,15 +398,15 @@ model QuoteRequest {
 }
 
 model QuoteRequestDraft {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   userId         String
   payload        Json
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -371,46 +424,46 @@ enum QuoteRequestStatus {
 }
 
 model QuoteRequestItem {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   quoteRequestId String
   lineNumber     Int
   description    String
-  quantity       Decimal      @db.Decimal(12, 2)
+  quantity       Decimal  @db.Decimal(12, 2)
   unit           String
-  technicalSpecs String?      @db.Text
-  createdAt      DateTime     @default(now())
+  technicalSpecs String?  @db.Text
+  createdAt      DateTime @default(now())
 
-  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
-  quoteLines     SupplierQuoteLine[]
+  quoteRequest QuoteRequest        @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  quoteLines   SupplierQuoteLine[]
 
   @@index([quoteRequestId])
 }
 
 model QuoteRequestAttachment {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   quoteRequestId String
   fileName       String
   mimeType       String?
   sizeBytes      Int
   content        Bytes
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime @default(now())
 
-  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  quoteRequest QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
 
   @@index([quoteRequestId])
 }
 
 model QuoteRequestSupplier {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   quoteRequestId String
   supplierId     String
   contactName    String?
   contactEmail   String?
   contactPhone   String?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime @default(now())
 
-  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
-  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  quoteRequest QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  supplier     Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   @@unique([quoteRequestId, supplierId])
   @@index([quoteRequestId])
@@ -428,8 +481,8 @@ model QuoteRequestEmailLog {
   status         QuoteEmailStatus @default(GENERADO)
   createdAt      DateTime         @default(now())
 
-  quoteRequest   QuoteRequest     @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
-  supplier       Supplier?        @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  quoteRequest QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@index([quoteRequestId])
   @@index([supplierId])
@@ -458,9 +511,9 @@ model SupplierQuote {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  quoteRequest   QuoteRequest        @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
-  supplier       Supplier            @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-  lines          SupplierQuoteLine[]
+  quoteRequest QuoteRequest        @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  supplier     Supplier            @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  lines        SupplierQuoteLine[]
 
   @@index([quoteRequestId])
   @@index([supplierId])
@@ -477,28 +530,28 @@ enum SupplierQuoteStatus {
 }
 
 model SupplierQuoteLine {
-  id                 String            @id @default(cuid())
+  id                 String   @id @default(cuid())
   supplierQuoteId    String
   quoteRequestItemId String?
   description        String
-  quantity           Decimal?          @db.Decimal(12, 2)
+  quantity           Decimal? @db.Decimal(12, 2)
   unit               String?
   brand              String?
   model              String?
-  unitPrice          Decimal?          @db.Decimal(12, 2)
-  totalPrice         Decimal?          @db.Decimal(12, 2)
-  tax                Decimal?          @db.Decimal(12, 2)
+  unitPrice          Decimal? @db.Decimal(12, 2)
+  totalPrice         Decimal? @db.Decimal(12, 2)
+  tax                Decimal? @db.Decimal(12, 2)
   leadTime           String?
   warranty           String?
   availability       String?
-  observations       String?           @db.Text
+  observations       String?  @db.Text
   matchScore         Int?
-  differences        String?           @db.Text
-  rawText            String?           @db.Text
-  createdAt          DateTime          @default(now())
+  differences        String?  @db.Text
+  rawText            String?  @db.Text
+  createdAt          DateTime @default(now())
 
-  supplierQuote      SupplierQuote     @relation(fields: [supplierQuoteId], references: [id], onDelete: Cascade)
-  quoteRequestItem   QuoteRequestItem? @relation(fields: [quoteRequestItemId], references: [id], onDelete: SetNull)
+  supplierQuote    SupplierQuote     @relation(fields: [supplierQuoteId], references: [id], onDelete: Cascade)
+  quoteRequestItem QuoteRequestItem? @relation(fields: [quoteRequestItemId], references: [id], onDelete: SetNull)
 
   @@index([supplierQuoteId])
   @@index([quoteRequestItemId])
@@ -534,19 +587,118 @@ model PriceHistory {
   @@index([recordedAt])
 }
 
+model Warehouse {
+  id             String        @id @default(cuid())
+  organizationId String
+  name           String
+  code           String
+  type           WarehouseType @default(GENERAL)
+  project        String?
+  location       String?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  balances       InventoryBalance[]
+  movements      InventoryMovement[]
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([name])
+}
+
+enum WarehouseType {
+  GENERAL
+  PROJECT
+}
+
+model InventoryBalance {
+  id          String   @id @default(cuid())
+  warehouseId String
+  itemId      String
+  quantity    Decimal  @default(0) @db.Decimal(14, 2)
+  updatedAt   DateTime @updatedAt
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([warehouseId, itemId])
+  @@index([warehouseId])
+  @@index([itemId])
+}
+
+model InventoryMovement {
+  id             String                @id @default(cuid())
+  organizationId String
+  warehouseId    String
+  itemId         String
+  orderId        String?
+  createdById    String?
+  type           InventoryMovementType
+  quantity       Decimal               @db.Decimal(14, 2)
+  unit           String?
+  reference      String?
+  notes          String?
+  createdAt      DateTime              @default(now())
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  item         Item           @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  order        PurchaseOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdBy    User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([warehouseId])
+  @@index([itemId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+enum InventoryMovementType {
+  ENTRADA
+  SALIDA
+  AJUSTE
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  actorName      String?
+  actorEmail     String?
+  action         String
+  entity         String
+  entityId       String?
+  summary        String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
 model AiChat {
-  id                  String       @id @default(cuid())
+  id                  String   @id @default(cuid())
   organizationId      String
   createdById         String?
   title               String
   openaiVectorStoreId String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy           User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  documents           AiDocument[]
-  questions           AiQuestion[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  documents    AiDocument[]
+  questions    AiQuestion[]
 
   @@index([organizationId])
   @@index([createdById])
@@ -555,7 +707,7 @@ model AiChat {
 }
 
 model AiDocument {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   chatId         String?
   uploadedById   String?
@@ -564,16 +716,16 @@ model AiDocument {
   extension      String?
   sizeBytes      Int
   openaiFileId   String?
-  extractedText  String       @db.Text
+  extractedText  String   @db.Text
   structuredJson Json?
-  summary        String       @db.Text
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  summary        String   @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  chat           AiChat?      @relation(fields: [chatId], references: [id], onDelete: SetNull)
-  uploadedBy     User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
-  questions      AiQuestion[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chat         AiChat?      @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  uploadedBy   User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  questions    AiQuestion[]
 
   @@index([organizationId])
   @@index([chatId])
@@ -583,18 +735,18 @@ model AiDocument {
 }
 
 model AiQuestion {
-  id         String     @id @default(cuid())
+  id         String   @id @default(cuid())
   documentId String
   chatId     String?
   askedById  String?
-  question   String     @db.Text
-  answer     String     @db.Text
+  question   String   @db.Text
+  answer     String   @db.Text
   context    Json?
-  createdAt  DateTime   @default(now())
+  createdAt  DateTime @default(now())
 
-  document   AiDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  chat       AiChat?    @relation(fields: [chatId], references: [id], onDelete: SetNull)
-  askedBy    User?      @relation(fields: [askedById], references: [id], onDelete: SetNull)
+  document AiDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chat     AiChat?    @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  askedBy  User?      @relation(fields: [askedById], references: [id], onDelete: SetNull)
 
   @@index([documentId])
   @@index([chatId])
@@ -603,15 +755,15 @@ model AiQuestion {
 }
 
 model AiProductAlias {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   canonicalName  String
   aliasName      String
-  confidence     Int          @default(80)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  confidence     Int      @default(80)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, aliasName])
   @@index([organizationId])

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../auth/auth.middleware";
+import { authenticate, requirePermission } from "../auth/auth.middleware";
 import { validate } from "../../middlewares/validate";
 import {
   createSupplierSchema,
@@ -12,6 +12,7 @@ import {
   deactivateSupplier,
   getSupplierById,
   listSuppliers,
+  restoreSupplier,
   updateSupplier,
 } from "./supplier.service";
 import { createContactForSupplier } from "../contacts/contact.service";
@@ -40,9 +41,9 @@ supplierRouter.get("/", validate({ query: supplierQuerySchema }), async (req, re
   }
 });
 
-supplierRouter.post("/", validate({ body: createSupplierSchema }), async (req, res, next) => {
+supplierRouter.post("/", requirePermission("suppliers:write"), validate({ body: createSupplierSchema }), async (req, res, next) => {
   try {
-    const supplier = await createSupplier(organizationId(req), createSupplierSchema.parse(req.body));
+    const supplier = await createSupplier(organizationId(req), req.user!.id, createSupplierSchema.parse(req.body));
     res.status(201).json({ supplier });
   } catch (error) {
     next(error);
@@ -61,11 +62,12 @@ supplierRouter.get("/:id", validate({ params: supplierIdParamsSchema }), async (
 
 supplierRouter.put(
   "/:id",
+  requirePermission("suppliers:write"),
   validate({ params: supplierIdParamsSchema, body: updateSupplierSchema }),
   async (req, res, next) => {
     try {
       const { id } = supplierIdParamsSchema.parse(req.params);
-      const supplier = await updateSupplier(organizationId(req), id, updateSupplierSchema.parse(req.body));
+      const supplier = await updateSupplier(organizationId(req), req.user!.id, id, updateSupplierSchema.parse(req.body));
       res.json({ supplier });
     } catch (error) {
       next(error);
@@ -73,10 +75,20 @@ supplierRouter.put(
   },
 );
 
-supplierRouter.delete("/:id", validate({ params: supplierIdParamsSchema }), async (req, res, next) => {
+supplierRouter.delete("/:id", requirePermission("suppliers:write"), validate({ params: supplierIdParamsSchema }), async (req, res, next) => {
   try {
     const { id } = supplierIdParamsSchema.parse(req.params);
-    await deactivateSupplier(organizationId(req), id);
+    await deactivateSupplier(organizationId(req), req.user!.id, id);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+supplierRouter.post("/:id/restore", requirePermission("suppliers:write"), validate({ params: supplierIdParamsSchema }), async (req, res, next) => {
+  try {
+    const { id } = supplierIdParamsSchema.parse(req.params);
+    await restoreSupplier(organizationId(req), req.user!.id, id);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -85,11 +97,12 @@ supplierRouter.delete("/:id", validate({ params: supplierIdParamsSchema }), asyn
 
 supplierRouter.post(
   "/:id/contacts",
+  requirePermission("suppliers:write"),
   validate({ params: supplierIdParamsSchema, body: createContactSchema }),
   async (req, res, next) => {
     try {
       const { id } = supplierIdParamsSchema.parse(req.params);
-      const contact = await createContactForSupplier(organizationId(req), id, createContactSchema.parse(req.body));
+      const contact = await createContactForSupplier(organizationId(req), req.user!.id, id, createContactSchema.parse(req.body));
       res.status(201).json({ contact });
     } catch (error) {
       next(error);

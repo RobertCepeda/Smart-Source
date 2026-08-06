@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { authenticate } from "../auth/auth.middleware";
+import { authenticate, requirePermission } from "../auth/auth.middleware";
 import { validate } from "../../middlewares/validate";
-import { createSupportTicket, listOrganizationTickets } from "./support.service";
-import { createSupportTicketSchema } from "./support.schema";
+import { createSupportTicket, listOrganizationTickets, updateSupportTicketStatus } from "./support.service";
+import { createSupportTicketSchema, supportTicketQuerySchema, ticketIdParamsSchema, updateSupportStatusSchema } from "./support.schema";
 
 export const supportRouter = Router();
 
@@ -18,9 +18,20 @@ function organizationId(req: Express.Request) {
   return req.user.organizationId;
 }
 
-supportRouter.get("/tickets", async (req, res, next) => {
+supportRouter.get("/tickets", validate({ query: supportTicketQuerySchema }), async (req, res, next) => {
   try {
-    res.json({ tickets: await listOrganizationTickets(organizationId(req)) });
+    const { group } = supportTicketQuerySchema.parse(req.query);
+    res.json({ tickets: await listOrganizationTickets(organizationId(req), group) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+supportRouter.put("/tickets/:id/status", requirePermission("organization:manage"), validate({ params: ticketIdParamsSchema, body: updateSupportStatusSchema }), async (req, res, next) => {
+  try {
+    const { id } = ticketIdParamsSchema.parse(req.params);
+    const { status } = updateSupportStatusSchema.parse(req.body);
+    res.json({ ticket: await updateSupportTicketStatus(organizationId(req), req.user!.id, id, status) });
   } catch (error) {
     next(error);
   }

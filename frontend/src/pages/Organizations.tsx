@@ -1,17 +1,50 @@
-import { useQuery } from "@tanstack/react-query";
-import { Building2, Crown, Inbox, PackageSearch, ReceiptText, Users } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building2, Crown, History, Inbox, PackageSearch, ReceiptText, RotateCcw, Users, Warehouse as WarehouseIcon } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { useAuth } from "../contexts/AuthContext";
-import { getOrganizationWorkspaceRequest } from "../services/api";
+import { getOrganizationWorkspaceRequest, listAuditLogsRequest, restoreCatalogItemRequest, restoreSupplierRequest, updateOrganizationUserRequest } from "../services/api";
+
+const roleOptions = [
+  { value: "ADMIN", label: "Administrador" },
+  { value: "MANAGER", label: "Gerencia" },
+  { value: "BUYER", label: "Compras" },
+  { value: "WAREHOUSE", label: "Almacén" },
+  { value: "VIEWER", label: "Solo lectura" },
+  { value: "CLIENT", label: "Cliente" },
+];
 
 export function Organizations() {
-  const { token } = useAuth();
+  const { token, user: currentUser } = useAuth();
+  const queryClient = useQueryClient();
+  const canManage = currentUser?.role === "OWNER" || currentUser?.role === "ADMIN" || currentUser?.role === "SYSTEM_ADMIN";
   const organizationQuery = useQuery({
     queryKey: ["organization-workspace"],
     queryFn: () => getOrganizationWorkspaceRequest(token!),
     enabled: Boolean(token),
+  });
+
+  const auditQuery = useQuery({
+    queryKey: ["organization-audit"],
+    queryFn: () => listAuditLogsRequest(token!, 60),
+    enabled: Boolean(token && canManage),
+  });
+
+  const roleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) => updateOrganizationUserRequest(token!, userId, { role }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["organization-workspace"] });
+      await queryClient.invalidateQueries({ queryKey: ["organization-audit"] });
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: ({ entityType, entityId }: { entityType: string; entityId: string }) => entityType === "SUPPLIER" ? restoreSupplierRequest(token!, entityId) : restoreCatalogItemRequest(token!, entityId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["organization-audit"] });
+      await queryClient.invalidateQueries({ queryKey: ["organization-workspace"] });
+    },
   });
 
   const workspace = organizationQuery.data;
@@ -50,12 +83,13 @@ export function Organizations() {
             </CardContent>
           </Card>
 
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <MetricCard label="Usuarios" value={organization.counts.users.toString()} icon={Users} />
             <MetricCard label="Suplidores" value={organization.counts.suppliers.toString()} icon={Building2} />
             <MetricCard label="Catálogo" value={organization.counts.items.toString()} icon={PackageSearch} />
             <MetricCard label="Órdenes" value={organization.counts.orders.toString()} icon={ReceiptText} />
             <MetricCard label="Solicitudes abiertas" value={organization.counts.openTickets.toString()} icon={Inbox} />
+            <MetricCard label="Almacenes" value={organization.counts.warehouses.toString()} icon={WarehouseIcon} />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-[1fr_0.8fr]">
@@ -65,12 +99,16 @@ export function Organizations() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {users.map((user) => (
-                  <div key={user.id} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[1fr_130px_110px] md:items-center">
+                  <div key={user.id} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[1fr_180px_90px] md:items-center">
                     <div>
                       <p className="text-[13px] font-bold text-ink">{user.name}</p>
                       <p className="mt-1 text-xs text-slate-500">{user.email}</p>
                     </div>
-                    <Badge tone={user.role === "ADMIN" || user.role === "SYSTEM_ADMIN" ? "blue" : "slate"}>{user.role}</Badge>
+                    {canManage && !["SYSTEM_ADMIN", "OWNER"].includes(user.role) ? (
+                      <select className="h-9 rounded-lg border border-border bg-white px-2 text-xs font-semibold" value={user.role} onChange={(event) => roleMutation.mutate({ userId: user.id, role: event.target.value })} disabled={roleMutation.isPending}>
+                        {roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    ) : <Badge tone={user.role === "ADMIN" || user.role === "SYSTEM_ADMIN" ? "blue" : "slate"}>{user.role}</Badge>}
                     <Badge tone={user.isActive ? "green" : "amber"}>{user.isActive ? "Activo" : "Inactivo"}</Badge>
                   </div>
                 ))}
@@ -98,6 +136,39 @@ export function Organizations() {
               </CardContent>
             </Card>
           </section>
+
+          {canManage ? (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <h2 className="text-base font-bold text-ink">Historial de cambios</h2>
+                  <p className="mt-1 text-xs text-slate-500">Usuario, acción y fecha de cada modificación sensible.</p>
+                </div>
+                <History className="h-5 w-5 text-brand-700" />
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-border">
+                  {(auditQuery.data?.logs ?? []).map((log) => (
+                    <div key={log.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-ink">{log.summary}</p>
+                        <p className="mt-1 text-xs text-slate-500">{log.user?.name ?? "Sistema"} · {formatDateTime(log.createdAt)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge tone={log.action === "DELETE" ? "amber" : log.action === "RESTORE" ? "green" : "slate"}>{log.action}</Badge>
+                        {log.action === "DELETE" && log.metadata?.restorable && log.entityId && ["SUPPLIER", "ITEM"].includes(log.entityType) ? (
+                          <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-semibold" onClick={() => restoreMutation.mutate({ entityType: log.entityType, entityId: log.entityId! })}>
+                            <RotateCcw className="h-3.5 w-3.5" /> Restaurar
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                  {!auditQuery.isLoading && !(auditQuery.data?.logs.length) ? <p className="p-5 text-center text-[13px] text-slate-500">Todavía no hay cambios registrados.</p> : null}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </>
       ) : (
         <Card>
@@ -135,4 +206,8 @@ function formatDate(value: string) {
     month: "long",
     day: "2-digit",
   }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("es-DO", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }

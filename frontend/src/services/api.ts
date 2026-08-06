@@ -92,11 +92,10 @@ export type Supplier = {
 
 export type SupplierPayload = {
   name: string;
-  rnc?: string;
-  category?: string;
+  rnc: string;
   city?: string;
   address?: string;
-  phone?: string;
+  phone: string;
   whatsapp?: string;
   email?: string;
   website?: string;
@@ -104,10 +103,10 @@ export type SupplierPayload = {
   facebook?: string;
   notes?: string;
   rating?: number;
-  contacts?: Array<{
+  contacts: Array<{
     name: string;
-    role?: string;
-    phone?: string;
+    role: string;
+    phone: string;
     whatsapp?: string;
     email?: string;
     isPrimary?: boolean;
@@ -133,6 +132,11 @@ export type CatalogEntity = {
   name: string;
 };
 
+export type CatalogSubcategory = CatalogEntity & {
+  categoryId: string;
+  category?: CatalogEntity;
+};
+
 export type CatalogItem = {
   id: string;
   name: string;
@@ -140,8 +144,10 @@ export type CatalogItem = {
   unit: string | null;
   description: string | null;
   categoryId: string | null;
+  subcategoryId: string | null;
   brandId: string | null;
   category: CatalogEntity | null;
+  subcategory: CatalogSubcategory | null;
   brand: CatalogEntity | null;
   supplierCount: number;
 };
@@ -211,6 +217,7 @@ export type CatalogItemPayload = {
   type: "MATERIAL" | "SERVICIO";
   unit?: string;
   categoryId?: string;
+  subcategoryId?: string;
   brandId?: string;
   description?: string;
 };
@@ -219,6 +226,7 @@ export type CatalogFilters = {
   search?: string;
   type?: "MATERIAL" | "SERVICIO";
   categoryId?: string;
+  subcategoryId?: string;
   brandId?: string;
 };
 
@@ -227,7 +235,7 @@ export type SupportTicket = {
   subject: string;
   category: "SOPORTE" | "MANTENIMIENTO" | "FACTURACION" | "IDEA";
   priority: "BAJA" | "NORMAL" | "ALTA";
-  status: "ABIERTO" | "EN_REVISION" | "RESUELTO" | "CERRADO";
+  status: "ABIERTO" | "EN_REVISION" | "EN_ESPERA" | "RESUELTO" | "CERRADO";
   createdAt: string;
   updatedAt: string;
   organization?: {
@@ -296,6 +304,11 @@ export type PurchaseOrder = {
   id: string;
   number: string;
   supplierId: string;
+  organizationId: string;
+  quoteRequestId: string | null;
+  warehouseId: string | null;
+  receivedAt: string | null;
+  costCenter: string | null;
   status: PurchaseOrderStatus;
   issueDate: string;
   currency: string;
@@ -304,6 +317,9 @@ export type PurchaseOrder = {
   total: string;
   notes: string | null;
   supplier: Pick<Supplier, "id" | "name" | "rnc" | "city" | "category" | "email" | "phone">;
+  warehouse: Pick<Warehouse, "id" | "name" | "code" | "type" | "location"> | null;
+  quoteRequest: Pick<QuoteRequest, "id" | "number" | "project" | "costCenter"> | null;
+  receivedBy: { id: string; name: string } | null;
   lines: PurchaseOrderLine[];
 };
 
@@ -313,6 +329,8 @@ export type PurchaseOrderPayload = {
   currency: string;
   taxRate: number;
   notes?: string;
+  costCenter?: string;
+  quoteRequestId?: string;
   lines: Array<{
     itemId: string;
     quantity: number;
@@ -586,6 +604,7 @@ export type OrganizationWorkspaceResponse = {
       supportTickets: number;
       orders: number;
       openTickets: number;
+      warehouses: number;
     };
   };
   users: Array<{
@@ -597,6 +616,55 @@ export type OrganizationWorkspaceResponse = {
     lastLoginAt: string | null;
     createdAt: string;
   }>;
+};
+
+export type AuditLog = {
+  id: string;
+  action: "CREATE" | "UPDATE" | "DELETE" | "RESTORE" | "STATUS_CHANGE" | "RECEIVE" | "INVENTORY_IN" | "INVENTORY_OUT";
+  entityType: string;
+  entityId: string | null;
+  summary: string;
+  before: unknown;
+  after: unknown;
+  metadata: { restorable?: boolean } | null;
+  createdAt: string;
+  user: { id: string; name: string; email: string } | null;
+};
+
+export type InventoryMovement = {
+  id: string;
+  warehouseId: string;
+  itemId: string;
+  orderId: string | null;
+  type: "ENTRADA" | "SALIDA" | "AJUSTE";
+  quantity: string;
+  unit: string | null;
+  reference: string | null;
+  notes: string | null;
+  createdAt: string;
+  item: Pick<CatalogItem, "id" | "name" | "unit">;
+  createdBy: { id: string; name: string } | null;
+  order: { id: string; number: string } | null;
+};
+
+export type Warehouse = {
+  id: string;
+  name: string;
+  code: string;
+  type: "GENERAL" | "PROJECT";
+  project: string | null;
+  location: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  balances: Array<{
+    id: string;
+    itemId: string;
+    quantity: string;
+    item: CatalogItem;
+  }>;
+  movements: InventoryMovement[];
+  _count: { balances: number; movements: number; purchaseOrders: number };
 };
 
 export type AiDocumentSummary = {
@@ -802,6 +870,13 @@ export async function deleteSupplierRequest(token: string, id: string) {
   }
 }
 
+export async function restoreSupplierRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.restoreSupplier(id);
+  }
+  return apiRequest<void>(`/suppliers/${id}/restore`, { method: "POST", headers: authHeaders(token) });
+}
+
 export async function listCatalogItemsRequest(token: string, filters: CatalogFilters = {}) {
   if (isDemoMode) {
     return demoApi.listCatalogItems(filters);
@@ -863,6 +938,13 @@ export async function deleteCatalogItemRequest(token: string, id: string) {
   }
 }
 
+export async function restoreCatalogItemRequest(token: string, id: string) {
+  if (isDemoMode) {
+    return demoApi.restoreCatalogItem(id);
+  }
+  return apiRequest<void>(`/items/${id}/restore`, { method: "POST", headers: authHeaders(token) });
+}
+
 export async function listCategoriesRequest(token: string) {
   if (isDemoMode) {
     return demoApi.listCategories();
@@ -882,6 +964,28 @@ export async function createCategoryRequest(token: string, name: string) {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify({ name }),
+  });
+}
+
+export async function listSubcategoriesRequest(token: string, categoryId?: string) {
+  if (isDemoMode) {
+    return demoApi.listSubcategories(categoryId);
+  }
+
+  return apiRequest<{ subcategories: CatalogSubcategory[] }>(`/subcategories${queryString({ categoryId })}`, {
+    headers: authHeaders(token),
+  });
+}
+
+export async function createSubcategoryRequest(token: string, payload: { categoryId: string; name: string }) {
+  if (isDemoMode) {
+    return demoApi.createSubcategory(payload);
+  }
+
+  return apiRequest<{ subcategory: CatalogSubcategory }>("/subcategories", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -929,13 +1033,25 @@ export async function createBrandRequest(token: string, name: string) {
   });
 }
 
-export async function listSupportTicketsRequest(token: string) {
+export async function listSupportTicketsRequest(token: string, group: "ALL" | "OPEN" | "CLOSED" | "STANDBY" = "ALL") {
   if (isDemoMode) {
-    return demoApi.listSupportTickets();
+    return demoApi.listSupportTickets(group);
   }
 
-  return apiRequest<{ tickets: SupportTicket[] }>("/support/tickets", {
+  return apiRequest<{ tickets: SupportTicket[] }>(`/support/tickets${queryString({ group })}`, {
     headers: authHeaders(token),
+  });
+}
+
+export async function updateSupportTicketStatusRequest(token: string, id: string, status: SupportTicket["status"]) {
+  if (isDemoMode) {
+    return demoApi.updateSupportTicketStatus(id, status);
+  }
+
+  return apiRequest<{ ticket: SupportTicket }>(`/support/tickets/${id}/status`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify({ status }),
   });
 }
 
@@ -978,15 +1094,16 @@ export async function updatePurchaseOrderStatusRequest(
   token: string,
   id: string,
   status: PurchaseOrderStatus,
+  warehouseId?: string,
 ) {
   if (isDemoMode) {
-    return demoApi.updatePurchaseOrderStatus(id, status);
+    return demoApi.updatePurchaseOrderStatus(id, status, warehouseId);
   }
 
   return apiRequest<{ order: PurchaseOrder }>(`/purchase-orders/${id}/status`, {
     method: "PUT",
     headers: authHeaders(token),
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, warehouseId }),
   });
 }
 
@@ -1297,6 +1414,53 @@ export async function getOrganizationWorkspaceRequest(token: string) {
 
   return apiRequest<OrganizationWorkspaceResponse>("/organizations", {
     headers: authHeaders(token),
+  });
+}
+
+export async function listAuditLogsRequest(token: string, limit = 50) {
+  if (isDemoMode) {
+    return demoApi.listAuditLogs(limit);
+  }
+  return apiRequest<{ logs: AuditLog[] }>(`/organizations/audit${queryString({ limit: String(limit) })}`, { headers: authHeaders(token) });
+}
+
+export async function updateOrganizationUserRequest(token: string, userId: string, payload: { role: string; isActive?: boolean }) {
+  if (isDemoMode) {
+    return demoApi.updateOrganizationUser(userId, payload);
+  }
+  return apiRequest<{ user: OrganizationWorkspaceResponse["users"][number] }>(`/organizations/users/${userId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listWarehousesRequest(token: string) {
+  if (isDemoMode) {
+    return demoApi.listWarehouses();
+  }
+  return apiRequest<{ warehouses: Warehouse[] }>("/warehouses", { headers: authHeaders(token) });
+}
+
+export async function createWarehouseRequest(token: string, payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; project?: string; location?: string }) {
+  if (isDemoMode) {
+    return demoApi.createWarehouse(payload);
+  }
+  return apiRequest<{ warehouse: Warehouse }>("/warehouses", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createInventoryMovementRequest(token: string, warehouseId: string, payload: { itemId: string; type: "SALIDA" | "AJUSTE"; quantity: number; unit?: string; reference?: string; notes?: string }) {
+  if (isDemoMode) {
+    return demoApi.createInventoryMovement(warehouseId, payload);
+  }
+  return apiRequest<{ balance: Warehouse["balances"][number]; movement: InventoryMovement }>(`/warehouses/${warehouseId}/movements`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
   });
 }
 

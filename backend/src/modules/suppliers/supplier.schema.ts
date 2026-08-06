@@ -17,8 +17,8 @@ export const supplierQuerySchema = z.object({
 
 export const contactInputSchema = z.object({
   name: z.string().trim().min(2, "El contacto necesita nombre"),
-  role: optionalString,
-  phone: optionalString,
+  role: z.string().trim().min(2, "El cargo es obligatorio"),
+  phone: z.string().trim().min(7, "El teléfono es obligatorio"),
   whatsapp: optionalString,
   email: optionalEmail,
   isPrimary: z.boolean().optional(),
@@ -33,11 +33,10 @@ export const catalogItemInputSchema = z.object({
 
 export const createSupplierSchema = z.object({
   name: z.string().trim().min(2, "El suplidor necesita nombre"),
-  rnc: optionalString,
-  category: optionalString,
+  rnc: z.string().trim().min(5, "El RNC o cédula es obligatorio"),
   city: optionalString,
   address: optionalString,
-  phone: optionalString,
+  phone: z.string().trim().min(7, "El teléfono es obligatorio"),
   whatsapp: optionalString,
   email: optionalEmail,
   website: optionalUrl,
@@ -45,7 +44,7 @@ export const createSupplierSchema = z.object({
   facebook: optionalString,
   notes: optionalString,
   rating: z.coerce.number().int().min(0).max(5).optional(),
-  contacts: z.array(contactInputSchema).optional(),
+  contacts: z.array(contactInputSchema).min(1, "Agrega el contacto principal"),
   tags: z.array(z.string().trim().min(1)).optional(),
   catalogItems: z.array(catalogItemInputSchema).optional(),
 });

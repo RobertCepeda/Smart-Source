@@ -10,3 +10,11 @@ export const createSupportTicketSchema = z.object({
 export const ticketIdParamsSchema = z.object({
   id: z.string().min(1),
 });
+
+export const supportTicketQuerySchema = z.object({
+  group: z.enum(["ALL", "OPEN", "CLOSED", "STANDBY"]).default("ALL"),
+});
+
+export const updateSupportStatusSchema = z.object({
+  status: z.enum(["ABIERTO", "EN_REVISION", "EN_ESPERA", "RESUELTO", "CERRADO"]),
+});

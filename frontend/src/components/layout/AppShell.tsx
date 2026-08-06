@@ -20,6 +20,7 @@ import {
   Settings,
   ShoppingCart,
   UserPlus,
+  Warehouse,
   X,
 } from "lucide-react";
 import { SmartSourceLogo } from "../brand/SmartSourceLogo";
@@ -61,6 +62,7 @@ const navigationGroups: NavigationGroup[] = [
     items: [
       { label: "Solicitudes", path: "/quote-requests", icon: ClipboardList },
       { label: "Órdenes", path: "/purchase-orders", icon: ShoppingCart },
+      { label: "Almacenes", path: "/warehouses", icon: Warehouse },
       { label: "Historial", path: "/purchase-history", icon: History },
       { label: "Precios", path: "/price-history", icon: LineChart },
       { label: "Reportes", path: "/reports", icon: BarChart3 },

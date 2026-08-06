@@ -21,6 +21,7 @@ import { SmartSearch } from "./pages/SmartSearch";
 import { SupportCenter } from "./pages/SupportCenter";
 import { SupplierDetail } from "./pages/SupplierDetail";
 import { SuppliersDirectory } from "./pages/SuppliersDirectory";
+import { Warehouses } from "./pages/Warehouses";
 import { Login } from "./pages/auth/Login";
 import { Register } from "./pages/auth/Register";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
@@ -76,6 +77,7 @@ function App() {
             <Route path="/search" element={<SmartSearch />} />
             <Route path="/registration" element={<Registration />} />
             <Route path="/purchase-orders" element={<PurchaseOrders />} />
+            <Route path="/warehouses" element={<Warehouses />} />
             <Route path="/quote-requests" element={<QuoteRequests />} />
             <Route path="/purchase-history" element={<PurchaseHistory />} />
             <Route path="/price-history" element={<PriceHistory />} />

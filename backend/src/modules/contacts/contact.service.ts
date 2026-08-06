@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { recordAudit } from "../../lib/audit";
 import type { createContactSchema, updateContactSchema } from "./contact.schema";
 import type { z } from "zod";
 
@@ -10,13 +11,17 @@ function cleanString(value?: string | null) {
   return cleaned ? cleaned : undefined;
 }
 
+function upperString(value?: string | null) {
+  return cleanString(value)?.toLocaleUpperCase("es");
+}
+
 function contactData(input: Partial<CreateContactInput>) {
   return {
-    name: cleanString(input.name),
-    role: cleanString(input.role),
-    phone: cleanString(input.phone),
-    whatsapp: cleanString(input.whatsapp),
-    email: cleanString(input.email),
+    name: upperString(input.name),
+    role: upperString(input.role),
+    phone: upperString(input.phone),
+    whatsapp: upperString(input.whatsapp),
+    email: upperString(input.email),
     isPrimary: input.isPrimary,
   };
 }
@@ -55,8 +60,8 @@ async function getContactOrThrow(organizationId: string, id: string) {
   return contact;
 }
 
-export async function createContactForSupplier(organizationId: string, supplierId: string, input: CreateContactInput) {
-  await ensureSupplier(organizationId, supplierId);
+export async function createContactForSupplier(organizationId: string, actorId: string, supplierId: string, input: CreateContactInput) {
+  const supplier = await ensureSupplier(organizationId, supplierId);
 
   if (input.isPrimary) {
     await prisma.contact.updateMany({
@@ -65,20 +70,22 @@ export async function createContactForSupplier(organizationId: string, supplierI
     });
   }
 
-  return prisma.contact.create({
+  const contact = await prisma.contact.create({
     data: {
       supplierId,
-      name: input.name.trim(),
-      role: cleanString(input.role),
-      phone: cleanString(input.phone),
-      whatsapp: cleanString(input.whatsapp),
-      email: cleanString(input.email),
+      name: upperString(input.name)!,
+      role: upperString(input.role),
+      phone: upperString(input.phone),
+      whatsapp: upperString(input.whatsapp),
+      email: upperString(input.email),
       isPrimary: input.isPrimary ?? false,
     },
   });
+  await recordAudit({ organizationId, userId: actorId, action: "CREATE", entityType: "CONTACT", entityId: contact.id, summary: `Creó el contacto ${contact.name} de ${supplier.name}`, after: contact });
+  return contact;
 }
 
-export async function updateContact(organizationId: string, id: string, input: UpdateContactInput) {
+export async function updateContact(organizationId: string, actorId: string, id: string, input: UpdateContactInput) {
   const contact = await getContactOrThrow(organizationId, id);
 
   if (input.isPrimary) {
@@ -88,13 +95,16 @@ export async function updateContact(organizationId: string, id: string, input: U
     });
   }
 
-  return prisma.contact.update({
+  const updated = await prisma.contact.update({
     where: { id },
     data: contactData(input),
   });
+  await recordAudit({ organizationId, userId: actorId, action: "UPDATE", entityType: "CONTACT", entityId: id, summary: `Actualizó el contacto ${updated.name}`, before: contact, after: updated });
+  return updated;
 }
 
-export async function deleteContact(organizationId: string, id: string) {
-  await getContactOrThrow(organizationId, id);
+export async function deleteContact(organizationId: string, actorId: string, id: string) {
+  const contact = await getContactOrThrow(organizationId, id);
   await prisma.contact.delete({ where: { id } });
+  await recordAudit({ organizationId, userId: actorId, action: "DELETE", entityType: "CONTACT", entityId: id, summary: `Eliminó el contacto ${contact.name}`, before: contact });
 }

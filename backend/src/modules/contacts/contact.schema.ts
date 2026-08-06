@@ -9,8 +9,8 @@ export const contactIdParamsSchema = z.object({
 
 export const createContactSchema = z.object({
   name: z.string().trim().min(2, "El contacto necesita nombre"),
-  role: optionalString,
-  phone: optionalString,
+  role: z.string().trim().min(2, "El cargo es obligatorio"),
+  phone: z.string().trim().min(7, "El teléfono es obligatorio"),
   whatsapp: optionalString,
   email: optionalEmail,
   isPrimary: z.boolean().optional(),

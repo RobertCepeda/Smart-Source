@@ -14,12 +14,11 @@ import {
   type SupplierPayload,
 } from "../services/api";
 
-const steps = ["Datos generales", "Contacto", "Catálogo", "Etiquetas"];
+const steps = ["Datos generales", "Contacto", "Catálogo", "Clasificación"];
 
 type FormState = {
   name: string;
   rnc: string;
-  category: string;
   city: string;
   address: string;
   phone: string;
@@ -39,7 +38,6 @@ type FormState = {
 const emptyForm: FormState = {
   name: "",
   rnc: "",
-  category: "",
   city: "",
   address: "",
   phone: "",
@@ -91,7 +89,6 @@ export function Registration() {
     setForm({
       name: supplier.name,
       rnc: supplier.rnc ?? "",
-      category: supplier.category ?? "",
       city: supplier.city ?? "",
       address: supplier.address ?? "",
       phone: supplier.phone ?? "",
@@ -126,7 +123,6 @@ export function Registration() {
     return {
       name: form.name,
       rnc: form.rnc,
-      category: form.category,
       city: form.city,
       address: form.address,
       phone: form.phone,
@@ -166,13 +162,34 @@ export function Registration() {
   function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!form.name.trim()) {
+    if (!form.name.trim() || !form.rnc.trim() || !form.phone.trim()) {
       setActiveStep(0);
-      setMessage("El nombre del suplidor es obligatorio.");
+      setMessage("Completa el nombre, RNC o cédula y teléfono del suplidor.");
+      return;
+    }
+
+    if (!form.contactName.trim() || !form.contactRole.trim() || !form.contactPhone.trim()) {
+      setActiveStep(1);
+      setMessage("Completa el nombre, cargo y teléfono del contacto principal.");
       return;
     }
 
     saveMutation.mutate();
+  }
+
+  function goNext() {
+    if (activeStep === 0 && (!form.name.trim() || !form.rnc.trim() || !form.phone.trim())) {
+      setMessage("Completa el nombre, RNC o cédula y teléfono del suplidor.");
+      return;
+    }
+
+    if (activeStep === 1 && (!form.contactName.trim() || !form.contactRole.trim() || !form.contactPhone.trim())) {
+      setMessage("Completa el nombre, cargo y teléfono del contacto principal.");
+      return;
+    }
+
+    setMessage(null);
+    setActiveStep((step) => step + 1);
   }
 
   return (
@@ -180,7 +197,7 @@ export function Registration() {
       <PageHeader
         eyebrow={editId ? "Editar suplidor" : "Alta"}
         title={editId ? "Actualizar suplidor" : "Registrar suplidor"}
-        description="Completa la información esencial. Luego seguiremos puliendo catálogo, precios y documentos en sus módulos."
+        description="Registra la información fiscal y el contacto principal. Los datos se guardan estandarizados en mayúsculas."
       />
 
       <Card>
@@ -216,24 +233,20 @@ export function Registration() {
             {activeStep === 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block md:col-span-2">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Nombre del suplidor</span>
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Nombre del suplidor *</span>
                   <Input value={form.name} onChange={(event) => updateField("name", event.target.value)} required />
                 </label>
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">RNC</span>
-                  <Input value={form.rnc} onChange={(event) => updateField("rnc", event.target.value)} />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Categoria</span>
-                  <Input value={form.category} onChange={(event) => updateField("category", event.target.value)} placeholder="Construccion, Oficina, Tecnologia" />
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">RNC o cédula *</span>
+                  <Input value={form.rnc} onChange={(event) => updateField("rnc", event.target.value)} required />
                 </label>
                 <label className="block">
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">Ciudad</span>
                   <Input value={form.city} onChange={(event) => updateField("city", event.target.value)} />
                 </label>
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Telefono principal</span>
-                  <Input value={form.phone} onChange={(event) => updateField("phone", event.target.value)} />
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Teléfono principal *</span>
+                  <Input value={form.phone} onChange={(event) => updateField("phone", event.target.value)} required />
                 </label>
                 <label className="block">
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">WhatsApp</span>
@@ -257,16 +270,16 @@ export function Registration() {
             {activeStep === 1 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block md:col-span-2">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Nombre del contacto principal</span>
-                  <Input value={form.contactName} onChange={(event) => updateField("contactName", event.target.value)} />
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Nombre del contacto principal *</span>
+                  <Input value={form.contactName} onChange={(event) => updateField("contactName", event.target.value)} required />
                 </label>
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Cargo</span>
-                  <Input value={form.contactRole} onChange={(event) => updateField("contactRole", event.target.value)} placeholder="Vendedor, gerente, soporte" />
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Cargo *</span>
+                  <Input value={form.contactRole} onChange={(event) => updateField("contactRole", event.target.value)} placeholder="Vendedor, gerente, soporte" required />
                 </label>
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Telefono</span>
-                  <Input value={form.contactPhone} onChange={(event) => updateField("contactPhone", event.target.value)} />
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Teléfono *</span>
+                  <Input value={form.contactPhone} onChange={(event) => updateField("contactPhone", event.target.value)} required />
                 </label>
                 <label className="block">
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">WhatsApp</span>
@@ -290,7 +303,7 @@ export function Registration() {
                   />
                 </label>
                 <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                  En el Módulo 2 esto se convertirá en catálogo completo con unidades, marcas y precios por suplidor.
+                  Estos productos quedarán relacionados con el suplidor. La categoría y subcategoría se administran desde Catálogo.
                 </p>
               </div>
             ) : null}
@@ -298,13 +311,16 @@ export function Registration() {
             {activeStep === 3 ? (
               <div className="space-y-4">
                 <label className="block">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Etiquetas</span>
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">Etiquetas internas (opcionales)</span>
                   <Input
                     value={form.tagsText}
                     onChange={(event) => updateField("tagsText", event.target.value)}
-                    placeholder="Crédito, Urgente, Local"
+                    placeholder="CRÉDITO, URGENTE, LOCAL"
                   />
                 </label>
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                  Las etiquetas sirven para búsquedas y agrupaciones internas, por ejemplo condiciones de crédito o prioridad. No sustituyen la categoría del catálogo.
+                </p>
                 <label className="block">
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">Notas internas</span>
                   <textarea
@@ -330,7 +346,7 @@ export function Registration() {
           </Button>
           <div className="flex gap-3">
             {activeStep < steps.length - 1 ? (
-              <Button type="button" onClick={() => setActiveStep((step) => step + 1)}>
+              <Button type="button" onClick={goNext}>
                 Siguiente
                 <ChevronRight className="h-4 w-4" />
               </Button>

@@ -1,4 +1,5 @@
-import { Globe, Mail, MapPin, MessageCircle, Pencil, Phone, Tags, Trash2 } from "lucide-react";
+import { Check, Globe, Mail, MapPin, MessageCircle, Pencil, Phone, Tags, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Supplier } from "../../services/api";
 import { Badge } from "../ui/badge";
@@ -19,21 +20,20 @@ function initials(name: string) {
     .join("");
 }
 
-function whatsappLink(value: string | null) {
-  if (!value) {
-    return undefined;
-  }
-
-  const phone = value.replace(/\D/g, "");
-  return phone ? `https://wa.me/${phone}` : undefined;
-}
-
 export function SupplierCard({ supplier, onDelete }: SupplierCardProps) {
+  const [copied, setCopied] = useState<string | null>(null);
   const primaryContact = supplier.contacts.find((contact) => contact.isPrimary) ?? supplier.contacts[0];
   const topItems = supplier.catalogItems.slice(0, 4);
   const callPhone = supplier.phone ?? primaryContact?.phone ?? null;
-  const whatsapp = whatsappLink(supplier.whatsapp ?? primaryContact?.whatsapp ?? null);
+  const whatsapp = supplier.whatsapp ?? primaryContact?.whatsapp ?? null;
   const email = supplier.email ?? primaryContact?.email ?? null;
+
+  async function copyValue(label: string, value: string | null) {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(label);
+    window.setTimeout(() => setCopied(null), 1400);
+  }
 
   return (
     <Card className="overflow-hidden">
@@ -54,11 +54,12 @@ export function SupplierCard({ supplier, onDelete }: SupplierCardProps) {
             </div>
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-slate-500">
               <MapPin className="h-3.5 w-3.5" />
-              {supplier.city || "Sin ciudad"} - {supplier.category || "Sin categoría"}
+              {supplier.city || "Sin ciudad"}{supplier.rnc ? ` · ${supplier.rnc}` : ""}
             </p>
             {primaryContact ? (
               <p className="mt-1 text-xs text-slate-500">
                 Contacto: <span className="font-semibold text-slate-700">{primaryContact.name}</span>
+                {primaryContact.phone ? <span> · {primaryContact.phone}</span> : null}
               </p>
             ) : null}
           </div>
@@ -85,24 +86,24 @@ export function SupplierCard({ supplier, onDelete }: SupplierCardProps) {
         </div>
 
         <div className="mt-4 grid grid-cols-6 gap-2">
-          <Button type="button" variant="outline" size="icon" title="Llamar" disabled={!callPhone} onClick={() => callPhone && window.open(`tel:${callPhone}`)}>
-            <Phone className="h-4 w-4" />
+          <Button type="button" variant="outline" size="icon" title="Copiar teléfono" disabled={!callPhone} onClick={() => copyValue("phone", callPhone)}>
+            {copied === "phone" ? <Check className="h-4 w-4 text-brand-600" /> : <Phone className="h-4 w-4" />}
           </Button>
-          <Button type="button" variant="outline" size="icon" title="WhatsApp" disabled={!whatsapp} onClick={() => whatsapp && window.open(whatsapp, "_blank")}>
-            <MessageCircle className="h-4 w-4" />
+          <Button type="button" variant="outline" size="icon" title="Copiar WhatsApp" disabled={!whatsapp} onClick={() => copyValue("whatsapp", whatsapp)}>
+            {copied === "whatsapp" ? <Check className="h-4 w-4 text-brand-600" /> : <MessageCircle className="h-4 w-4" />}
           </Button>
-          <Button type="button" variant="outline" size="icon" title="Email" disabled={!email} onClick={() => email && window.open(`mailto:${email}`)}>
-            <Mail className="h-4 w-4" />
+          <Button type="button" variant="outline" size="icon" title="Copiar correo" disabled={!email} onClick={() => copyValue("email", email)}>
+            {copied === "email" ? <Check className="h-4 w-4 text-brand-600" /> : <Mail className="h-4 w-4" />}
           </Button>
           <Button
             type="button"
             variant="outline"
             size="icon"
-            title="Web"
+            title="Copiar sitio web"
             disabled={!supplier.website}
-            onClick={() => supplier.website && window.open(supplier.website, "_blank")}
+            onClick={() => copyValue("web", supplier.website)}
           >
-            <Globe className="h-4 w-4" />
+            {copied === "web" ? <Check className="h-4 w-4 text-brand-600" /> : <Globe className="h-4 w-4" />}
           </Button>
           <Link
             to={`/registration?edit=${supplier.id}`}

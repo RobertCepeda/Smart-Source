@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { prisma } from "../../lib/prisma";
+import { recordAudit } from "../../lib/audit";
 import { parseUploadedDocument } from "../ai-consult/aiConsult.service";
 import type {
   createQuoteRequestSchema,
@@ -394,6 +395,8 @@ export async function createQuoteRequest(
       include: quoteRequestInclude,
     });
   });
+
+  await recordAudit({ organizationId, userId: requesterId, action: "CREATE", entityType: "QUOTE_REQUEST", entityId: request.id, summary: `Creó la solicitud ${request.number}`, after: request });
 
   if (requesterId) {
     await deleteQuoteRequestDraft(organizationId, requesterId);

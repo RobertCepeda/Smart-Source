@@ -1,4 +1,5 @@
 import { prisma } from "../../lib/prisma";
+import { recordAudit } from "../../lib/audit";
 import type { createSupportTicketSchema } from "./support.schema";
 import type { z } from "zod";
 
@@ -19,9 +20,17 @@ function mapTicket(ticket: any) {
   };
 }
 
-export async function listOrganizationTickets(organizationId: string) {
+export async function listOrganizationTickets(organizationId: string, group: "ALL" | "OPEN" | "CLOSED" | "STANDBY" = "ALL") {
+  const statuses =
+    group === "OPEN"
+      ? ["ABIERTO", "EN_REVISION"]
+      : group === "CLOSED"
+        ? ["RESUELTO", "CERRADO"]
+        : group === "STANDBY"
+          ? ["EN_ESPERA"]
+          : undefined;
   const tickets = await prisma.supportTicket.findMany({
-    where: { organizationId },
+    where: { organizationId, ...(statuses ? { status: { in: statuses as any } } : {}) },
     include: { messages: { orderBy: { createdAt: "asc" } }, organization: true, requester: true },
     orderBy: { updatedAt: "desc" },
   });
@@ -54,6 +63,24 @@ export async function createSupportTicket(organizationId: string, requesterId: s
     include: { messages: { orderBy: { createdAt: "asc" } }, organization: true, requester: true },
   });
 
+  await recordAudit({ organizationId, userId: requesterId, action: "CREATE", entityType: "SUPPORT_TICKET", entityId: ticket.id, summary: `Creó la solicitud de atención ${ticket.subject}`, after: ticket });
+
+  return mapTicket(ticket);
+}
+
+export async function updateSupportTicketStatus(organizationId: string, actorId: string, id: string, status: "ABIERTO" | "EN_REVISION" | "EN_ESPERA" | "RESUELTO" | "CERRADO") {
+  const previous = await prisma.supportTicket.findFirst({ where: { id, organizationId } });
+  if (!previous) {
+    const error = new Error("Solicitud de atención no encontrada.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+  const ticket = await prisma.supportTicket.update({
+    where: { id },
+    data: { status },
+    include: { messages: { orderBy: { createdAt: "asc" } }, organization: true, requester: true },
+  });
+  await recordAudit({ organizationId, userId: actorId, action: "STATUS_CHANGE", entityType: "SUPPORT_TICKET", entityId: id, summary: `Cambió el estado de ${ticket.subject} a ${status}`, before: { status: previous.status }, after: { status } });
   return mapTicket(ticket);
 }
 
