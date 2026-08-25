@@ -8,6 +8,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { AiConsult } from "./pages/AiConsult";
 import { Catalog } from "./pages/Catalog";
 import { CatalogItemDetail } from "./pages/CatalogItemDetail";
+import { CostCenters } from "./pages/CostCenters";
 import { Dashboard } from "./pages/Dashboard";
 import { Organizations } from "./pages/Organizations";
 import { PriceHistory } from "./pages/PriceHistory";
@@ -72,6 +73,7 @@ function App() {
             <Route path="/suppliers" element={<SuppliersDirectory />} />
             <Route path="/suppliers/:id" element={<SupplierDetail />} />
             <Route path="/organizations" element={<Organizations />} />
+            <Route path="/cost-centers" element={<CostCenters />} />
             <Route path="/catalog" element={<Catalog />} />
             <Route path="/catalog/:id" element={<CatalogItemDetail />} />
             <Route path="/search" element={<SmartSearch />} />

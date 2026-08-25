@@ -37,11 +37,13 @@ import {
   getQuoteRequestRequest,
   getQuoteRequestDraftRequest,
   listCatalogItemsRequest,
+  listCostCentersRequest,
   listQuoteRequestsRequest,
   listSuppliersRequest,
   listUnitsRequest,
   saveQuoteRequestDraftRequest,
   type CatalogItem,
+  type CostCenter,
   type QuoteRequest,
   type QuoteRequestDraftPayload,
   type QuoteRequestPayload,
@@ -105,6 +107,7 @@ function resolveLineDescription(line: RequestLineForm) {
 function hasDraftContent(draft: QuoteRequestDraftPayload) {
   return Boolean(
     draft.project.trim() ||
+      draft.costCenterId.trim() ||
       draft.costCenter.trim() ||
       draft.deadline.trim() ||
       draft.observations.trim() ||
@@ -119,6 +122,7 @@ export function QuoteRequests() {
   const [viewMode, setViewMode] = useState<ViewMode>("create");
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [project, setProject] = useState("");
+  const [costCenterId, setCostCenterId] = useState("");
   const [costCenter, setCostCenter] = useState("");
   const [requesterName, setRequesterName] = useState("");
   const [requesterPrefilled, setRequesterPrefilled] = useState(false);
@@ -145,6 +149,11 @@ export function QuoteRequests() {
   const unitsQuery = useQuery({
     queryKey: ["units"],
     queryFn: () => listUnitsRequest(token!),
+    enabled: Boolean(token),
+  });
+  const costCentersQuery = useQuery({
+    queryKey: ["cost-centers", "quote-request"],
+    queryFn: () => listCostCentersRequest(token!),
     enabled: Boolean(token),
   });
 
@@ -185,6 +194,7 @@ export function QuoteRequests() {
 
     if (draft) {
       setProject(draft.payload.project);
+      setCostCenterId(draft.payload.costCenterId ?? "");
       setCostCenter(draft.payload.costCenter);
       setRequesterName(draft.payload.requesterName);
       setDeadline(draft.payload.deadline);
@@ -221,6 +231,7 @@ export function QuoteRequests() {
 
     const draftPayload: QuoteRequestDraftPayload = {
       project,
+      costCenterId,
       costCenter,
       requesterName,
       deadline,
@@ -244,7 +255,7 @@ export function QuoteRequests() {
     }, 300);
 
     return () => window.clearTimeout(timeout);
-  }, [costCenter, deadline, deleteDraft, draftHydrated, lines, observations, project, requesterName, saveDraft, selectedSupplierIds]);
+  }, [costCenter, costCenterId, deadline, deleteDraft, draftHydrated, lines, observations, project, requesterName, saveDraft, selectedSupplierIds]);
 
   useEffect(
     () => () => {
@@ -314,6 +325,7 @@ export function QuoteRequests() {
       setDraftWasRestored(false);
       setNotice(`Solicitud ${request.number} creada correctamente.`);
       setProject("");
+      setCostCenterId("");
       setCostCenter("");
       setDeadline("");
       setObservations("");
@@ -401,6 +413,7 @@ export function QuoteRequests() {
     latestDraftRef.current = null;
     setDraftUpdatedAt(null);
     setProject("");
+    setCostCenterId("");
     setCostCenter("");
     setDeadline("");
     setObservations("");
@@ -439,6 +452,7 @@ export function QuoteRequests() {
     createMutation.mutate({
       payload: {
         project,
+        costCenterId,
         costCenter,
         requesterName,
         deadline,
@@ -494,8 +508,9 @@ export function QuoteRequests() {
           selectedSupplierIds={selectedSupplierIds}
           catalogItems={catalogItems}
           units={units}
+          costCenters={(costCentersQuery.data?.costCenters ?? []).filter((entry) => entry.isActive)}
           project={project}
-          costCenter={costCenter}
+          costCenterId={costCenterId}
           requesterName={requesterName}
           deadline={deadline}
           observations={observations}
@@ -509,7 +524,11 @@ export function QuoteRequests() {
           isCreatingUnit={createUnitMutation.isPending}
           restoredDraftAt={draftWasRestored ? draftUpdatedAt : null}
           onProjectChange={setProject}
-          onCostCenterChange={setCostCenter}
+          onCostCenterChange={(id) => {
+            const selected = costCentersQuery.data?.costCenters.find((entry) => entry.id === id);
+            setCostCenterId(id);
+            setCostCenter(selected ? `${selected.code} - ${selected.name}` : "");
+          }}
           onRequesterNameChange={setRequesterName}
           onDeadlineChange={setDeadline}
           onObservationsChange={setObservations}
@@ -560,8 +579,9 @@ function CreateQuoteRequestPanel({
   selectedSupplierIds,
   catalogItems,
   units,
+  costCenters,
   project,
-  costCenter,
+  costCenterId,
   requesterName,
   deadline,
   observations,
@@ -593,8 +613,9 @@ function CreateQuoteRequestPanel({
   selectedSupplierIds: string[];
   catalogItems: CatalogItem[];
   units: UnitOfMeasure[];
+  costCenters: CostCenter[];
   project: string;
-  costCenter: string;
+  costCenterId: string;
   requesterName: string;
   deadline: string;
   observations: string;
@@ -648,7 +669,11 @@ function CreateQuoteRequestPanel({
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Centro de costo</span>
-              <Input value={costCenter} onChange={(event) => onCostCenterChange(event.target.value)} placeholder="Ej. CC-204" />
+              <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100" value={costCenterId} onChange={(event) => onCostCenterChange(event.target.value)}>
+                <option value="">Selecciona un centro de costo</option>
+                {costCenters.map((entry) => <option key={entry.id} value={entry.id}>{entry.code} - {entry.name}</option>)}
+              </select>
+              {!costCenters.length ? <Link to="/cost-centers" className="mt-1.5 inline-flex text-xs font-semibold text-brand-700 hover:underline">Crear centro de costo</Link> : null}
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Solicitante</span>

@@ -40,7 +40,8 @@ const orderInclude = {
     orderBy: { id: "asc" as const },
   },
   warehouse: { select: { id: true, name: true, code: true, type: true, location: true } },
-  quoteRequest: { select: { id: true, number: true, project: true, costCenter: true } },
+  costCenterRef: { select: { id: true, code: true, name: true, isActive: true } },
+  quoteRequest: { select: { id: true, number: true, project: true, costCenter: true, costCenterId: true } },
   receivedBy: { select: { id: true, name: true } },
 };
 
@@ -66,7 +67,9 @@ function mapOrder(order: any) {
     quoteRequestId: order.quoteRequestId,
     warehouseId: order.warehouseId,
     receivedAt: order.receivedAt,
+    costCenterId: order.costCenterId,
     costCenter: order.costCenter,
+    costCenterRecord: order.costCenterRef,
     status: order.status,
     issueDate: order.issueDate,
     currency: order.currency,
@@ -209,6 +212,15 @@ export async function createPurchaseOrder(organizationId: string, actorId: strin
     (error as Error & { status: number }).status = 400;
     throw error;
   }
+  const selectedCostCenterId = cleanString(input.costCenterId) ?? quoteRequest?.costCenterId ?? undefined;
+  const costCenter = selectedCostCenterId
+    ? await prisma.costCenter.findFirst({ where: { id: selectedCostCenterId, organizationId, isActive: true } })
+    : null;
+  if (selectedCostCenterId && !costCenter) {
+    const error = new Error("El centro de costo seleccionado no está disponible.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
 
   const lines = input.lines.map((line) => {
     const lineTotal = money(line.quantity * line.unitPrice);
@@ -235,7 +247,8 @@ export async function createPurchaseOrder(organizationId: string, actorId: strin
         number,
         supplierId: input.supplierId,
         quoteRequestId: input.quoteRequestId,
-        costCenter: cleanString(input.costCenter) ?? quoteRequest?.costCenter ?? undefined,
+        costCenterId: costCenter?.id,
+        costCenter: costCenter ? `${costCenter.code} - ${costCenter.name}` : cleanString(input.costCenter) ?? quoteRequest?.costCenter ?? undefined,
         issueDate: input.issueDate ? new Date(input.issueDate) : undefined,
         currency: input.currency.trim().toUpperCase(),
         subtotal: decimalString(subtotal),

@@ -18,6 +18,7 @@ export const createPurchaseOrderSchema = z.object({
   currency: z.string().trim().min(3).max(3).default("DOP"),
   taxRate: z.coerce.number().min(0).max(1).default(0.18),
   notes: z.string().trim().max(800).optional(),
+  costCenterId: z.string().trim().optional(),
   costCenter: z.string().trim().max(80).optional(),
   quoteRequestId: z.string().optional(),
   lines: z

@@ -10,6 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   createPurchaseOrderRequest,
   listCatalogItemsRequest,
+  listCostCentersRequest,
   listPurchaseOrdersRequest,
   listQuoteRequestsRequest,
   listSuppliersRequest,
@@ -56,6 +57,7 @@ export function PurchaseOrders() {
   const [currency, setCurrency] = useState("DOP");
   const [taxRate, setTaxRate] = useState("0.18");
   const [notes, setNotes] = useState("");
+  const [costCenterId, setCostCenterId] = useState("");
   const [costCenter, setCostCenter] = useState("");
   const [quoteRequestId, setQuoteRequestId] = useState("");
   const [lines, setLines] = useState<LineForm[]>([{ ...emptyLine }]);
@@ -81,6 +83,7 @@ export function PurchaseOrders() {
   });
 
   const quoteRequestsQuery = useQuery({ queryKey: ["quote-requests", "order-form"], queryFn: () => listQuoteRequestsRequest(token!), enabled: Boolean(token) });
+  const costCentersQuery = useQuery({ queryKey: ["cost-centers", "order-form"], queryFn: () => listCostCentersRequest(token!), enabled: Boolean(token) });
   const warehousesQuery = useQuery({ queryKey: ["warehouses", "order-form"], queryFn: () => listWarehousesRequest(token!), enabled: Boolean(token) });
 
   const suppliers = useMemo(() => suppliersQuery.data?.suppliers ?? [], [suppliersQuery.data?.suppliers]);
@@ -124,6 +127,7 @@ export function PurchaseOrders() {
     onSuccess: async ({ order }) => {
       setNotice(`Orden ${order.number} creada correctamente.`);
       setNotes("");
+      setCostCenterId("");
       setCostCenter("");
       setQuoteRequestId("");
       setLines([{ ...emptyLine }]);
@@ -199,6 +203,7 @@ export function PurchaseOrders() {
       currency,
       taxRate: Number(taxRate) || 0,
       notes,
+      costCenterId,
       costCenter,
       quoteRequestId: quoteRequestId || undefined,
       lines: validLines,
@@ -269,14 +274,17 @@ export function PurchaseOrders() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Solicitud de origen</span>
-                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={quoteRequestId} onChange={(event) => { const id = event.target.value; setQuoteRequestId(id); const request = quoteRequests.find((entry) => entry.id === id); if (request?.costCenter) setCostCenter(request.costCenter); }}>
+                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={quoteRequestId} onChange={(event) => { const id = event.target.value; setQuoteRequestId(id); const request = quoteRequests.find((entry) => entry.id === id); setCostCenterId(request?.costCenterId ?? ""); setCostCenter(request?.costCenter ?? ""); }}>
                     <option value="">Orden directa</option>
                     {quoteRequests.map((request) => <option key={request.id} value={request.id}>{request.number} · {request.project}</option>)}
                   </select>
                 </label>
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Centro de costo</span>
-                  <Input value={costCenter} onChange={(event) => setCostCenter(event.target.value)} placeholder="Ej. CC-204" />
+                  <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={costCenterId} onChange={(event) => { const id = event.target.value; const selected = costCentersQuery.data?.costCenters.find((entry) => entry.id === id); setCostCenterId(id); setCostCenter(selected ? `${selected.code} - ${selected.name}` : ""); }}>
+                    <option value="">Sin centro de costo</option>
+                    {(costCentersQuery.data?.costCenters ?? []).filter((entry) => entry.isActive).map((entry) => <option key={entry.id} value={entry.id}>{entry.code} - {entry.name}</option>)}
+                  </select>
                 </label>
               </div>
 

@@ -34,6 +34,7 @@ model User {
   quoteRequestDrafts QuoteRequestDraft[]
   auditLogs          AuditLog[]
   inventoryMovements InventoryMovement[]
+  inventoryTransfers InventoryTransfer[]
   receivedOrders     PurchaseOrder[]     @relation("OrderReceiver")
 
   @@index([email])
@@ -65,8 +66,10 @@ model Organization {
   quoteRequests      QuoteRequest[]
   quoteRequestDrafts QuoteRequestDraft[]
   purchaseOrders     PurchaseOrder[]
+  costCenters        CostCenter[]
   warehouses         Warehouse[]
   inventoryMovements InventoryMovement[]
+  inventoryTransfers InventoryTransfer[]
   auditLogs          AuditLog[]
 
   @@index([name])
@@ -102,6 +105,8 @@ enum AuthProvider {
 model Supplier {
   id             String    @id @default(cuid())
   organizationId String?
+  categoryId     String?
+  subcategoryId  String?
   name           String
   rnc            String?
   category       String?
@@ -129,10 +134,14 @@ model Supplier {
   quoteRequestEmailLogs QuoteRequestEmailLog[]
   supplierQuotes        SupplierQuote[]
   organization          Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  categoryRef           Category?              @relation("SupplierCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  subcategoryRef        Subcategory?           @relation("SupplierSubcategory", fields: [subcategoryId], references: [id], onDelete: SetNull)
 
   @@index([name])
   @@index([city])
   @@index([category])
+  @@index([categoryId])
+  @@index([subcategoryId])
   @@index([organizationId])
 }
 
@@ -219,6 +228,7 @@ model Category {
   name           String
   items          Item[]
   subcategories  Subcategory[]
+  suppliers      Supplier[]     @relation("SupplierCategory")
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, name])
@@ -233,6 +243,7 @@ model Subcategory {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   category       Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   items          Item[]
+  suppliers      Supplier[]    @relation("SupplierSubcategory")
 
   @@unique([organizationId, categoryId, name])
   @@index([organizationId])
@@ -285,6 +296,7 @@ model Item {
   priceHistory       PriceHistory[]
   inventoryBalances  InventoryBalance[]
   inventoryMovements InventoryMovement[]
+  inventoryTransfers InventoryTransfer[]
   isActive           Boolean             @default(true)
   deletedAt          DateTime?
 
@@ -334,6 +346,7 @@ model PurchaseOrder {
   quoteRequestId     String?
   warehouseId        String?
   receivedById       String?
+  costCenterId       String?
   status             OrderStatus         @default(BORRADOR)
   issueDate          DateTime            @default(now())
   receivedAt         DateTime?
@@ -348,6 +361,7 @@ model PurchaseOrder {
   quoteRequest       QuoteRequest?       @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
   warehouse          Warehouse?          @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
   receivedBy         User?               @relation("OrderReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
+  costCenterRef      CostCenter?          @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
   lines              PurchaseOrderLine[]
   inventoryMovements InventoryMovement[]
 
@@ -355,6 +369,7 @@ model PurchaseOrder {
   @@index([supplierId])
   @@index([quoteRequestId])
   @@index([warehouseId])
+  @@index([costCenterId])
   @@index([status])
   @@index([issueDate])
 }
@@ -370,6 +385,7 @@ model QuoteRequest {
   id             String             @id @default(cuid())
   organizationId String
   requesterId    String?
+  costCenterId   String?
   number         String             @unique
   status         QuoteRequestStatus @default(BORRADOR)
   project        String
@@ -382,6 +398,7 @@ model QuoteRequest {
 
   organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   requester      User?                    @relation(fields: [requesterId], references: [id], onDelete: SetNull)
+  costCenterRef  CostCenter?              @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
   items          QuoteRequestItem[]
   attachments    QuoteRequestAttachment[]
   suppliers      QuoteRequestSupplier[]
@@ -391,6 +408,7 @@ model QuoteRequest {
 
   @@index([organizationId])
   @@index([requesterId])
+  @@index([costCenterId])
   @@index([number])
   @@index([status])
   @@index([deadline])
@@ -593,7 +611,6 @@ model Warehouse {
   name           String
   code           String
   type           WarehouseType @default(GENERAL)
-  project        String?
   location       String?
   isActive       Boolean       @default(true)
   createdAt      DateTime      @default(now())
@@ -603,6 +620,8 @@ model Warehouse {
   balances       InventoryBalance[]
   movements      InventoryMovement[]
   purchaseOrders PurchaseOrder[]
+  outgoingTransfers InventoryTransfer[] @relation("TransferOrigin")
+  incomingTransfers InventoryTransfer[] @relation("TransferDestination")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -636,6 +655,7 @@ model InventoryMovement {
   itemId         String
   orderId        String?
   createdById    String?
+  transferId     String?
   type           InventoryMovementType
   quantity       Decimal               @db.Decimal(14, 2)
   unit           String?
@@ -648,11 +668,13 @@ model InventoryMovement {
   item         Item           @relation(fields: [itemId], references: [id], onDelete: Restrict)
   order        PurchaseOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
   createdBy    User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  transfer     InventoryTransfer? @relation(fields: [transferId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([warehouseId])
   @@index([itemId])
   @@index([orderId])
+  @@index([transferId])
   @@index([createdAt])
 }
 
@@ -660,6 +682,53 @@ enum InventoryMovementType {
   ENTRADA
   SALIDA
   AJUSTE
+  TRANSFERENCIA_SALIDA
+  TRANSFERENCIA_ENTRADA
+}
+
+model InventoryTransfer {
+  id                     String   @id @default(cuid())
+  organizationId         String
+  originWarehouseId      String
+  destinationWarehouseId String
+  itemId                 String
+  createdById            String?
+  quantity               Decimal  @db.Decimal(14, 2)
+  unit                   String?
+  notes                  String?
+  createdAt              DateTime @default(now())
+
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  originWarehouse      Warehouse    @relation("TransferOrigin", fields: [originWarehouseId], references: [id], onDelete: Restrict)
+  destinationWarehouse Warehouse    @relation("TransferDestination", fields: [destinationWarehouseId], references: [id], onDelete: Restrict)
+  item                 Item         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  createdBy            User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  movements            InventoryMovement[]
+
+  @@index([organizationId])
+  @@index([originWarehouseId])
+  @@index([destinationWarehouseId])
+  @@index([itemId])
+  @@index([createdAt])
+}
+
+model CostCenter {
+  id             String   @id @default(cuid())
+  organizationId String
+  code           String
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  quoteRequests QuoteRequest[]
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([name])
 }
 
 model AuditLog {

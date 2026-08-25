@@ -34,6 +34,8 @@ export const catalogItemInputSchema = z.object({
 export const createSupplierSchema = z.object({
   name: z.string().trim().min(2, "El suplidor necesita nombre"),
   rnc: z.string().trim().min(5, "El RNC o cédula es obligatorio"),
+  categoryId: optionalString,
+  subcategoryId: optionalString,
   city: optionalString,
   address: optionalString,
   phone: z.string().trim().min(7, "El teléfono es obligatorio"),

@@ -10,6 +10,8 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   createSupplierRequest,
   getSupplierRequest,
+  listCategoriesRequest,
+  listSubcategoriesRequest,
   updateSupplierRequest,
   type SupplierPayload,
 } from "../services/api";
@@ -19,6 +21,8 @@ const steps = ["Datos generales", "Contacto", "Catálogo", "Clasificación"];
 type FormState = {
   name: string;
   rnc: string;
+  categoryId: string;
+  subcategoryId: string;
   city: string;
   address: string;
   phone: string;
@@ -38,6 +42,8 @@ type FormState = {
 const emptyForm: FormState = {
   name: "",
   rnc: "",
+  categoryId: "",
+  subcategoryId: "",
   city: "",
   address: "",
   phone: "",
@@ -76,6 +82,20 @@ export function Registration() {
     queryFn: () => getSupplierRequest(token!, editId!),
     enabled: Boolean(token && editId),
   });
+  const categoriesQuery = useQuery({
+    queryKey: ["categories", "supplier-registration"],
+    queryFn: () => listCategoriesRequest(token!),
+    enabled: Boolean(token),
+  });
+  const subcategoriesQuery = useQuery({
+    queryKey: ["subcategories", "supplier-registration"],
+    queryFn: () => listSubcategoriesRequest(token!),
+    enabled: Boolean(token),
+  });
+  const availableSubcategories = useMemo(
+    () => (subcategoriesQuery.data?.subcategories ?? []).filter((entry) => entry.categoryId === form.categoryId),
+    [form.categoryId, subcategoriesQuery.data?.subcategories],
+  );
 
   useEffect(() => {
     const supplier = supplierQuery.data?.supplier;
@@ -89,6 +109,8 @@ export function Registration() {
     setForm({
       name: supplier.name,
       rnc: supplier.rnc ?? "",
+      categoryId: supplier.categoryId ?? "",
+      subcategoryId: supplier.subcategoryId ?? "",
       city: supplier.city ?? "",
       address: supplier.address ?? "",
       phone: supplier.phone ?? "",
@@ -123,6 +145,8 @@ export function Registration() {
     return {
       name: form.name,
       rnc: form.rnc,
+      categoryId: form.categoryId,
+      subcategoryId: form.subcategoryId,
       city: form.city,
       address: form.address,
       phone: form.phone,
@@ -310,6 +334,38 @@ export function Registration() {
 
             {activeStep === 3 ? (
               <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">Categoría</span>
+                    <select
+                      className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                      value={form.categoryId}
+                      onChange={(event) => setForm((current) => ({ ...current, categoryId: event.target.value, subcategoryId: "" }))}
+                    >
+                      <option value="">Sin categoría</option>
+                      {(categoriesQuery.data?.categories ?? []).map((category) => (
+                        <option key={category.id} value={category.id}>{category.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">Subcategoría</span>
+                    <select
+                      className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-400"
+                      value={form.subcategoryId}
+                      onChange={(event) => updateField("subcategoryId", event.target.value)}
+                      disabled={!form.categoryId}
+                    >
+                      <option value="">Sin subcategoría</option>
+                      {availableSubcategories.map((subcategory) => (
+                        <option key={subcategory.id} value={subcategory.id}>{subcategory.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                  Estas opciones se administran desde Catálogo y mantienen uniforme la clasificación de los suplidores.
+                </p>
                 <label className="block">
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">Etiquetas internas (opcionales)</span>
                   <Input

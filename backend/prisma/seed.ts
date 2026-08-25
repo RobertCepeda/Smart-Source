@@ -45,6 +45,20 @@ async function main() {
       prisma.category.create({ data: { name, organizationId: organization.id } }),
     ),
   );
+  const [concreteSubcategory, wiringSubcategory, officeSubcategory, computerSubcategory, maintenanceSubcategory] = await Promise.all([
+    prisma.subcategory.create({ data: { organizationId: organization.id, categoryId: construction.id, name: "HORMIGÓN Y CEMENTO" } }),
+    prisma.subcategory.create({ data: { organizationId: organization.id, categoryId: electrical.id, name: "CABLEADO" } }),
+    prisma.subcategory.create({ data: { organizationId: organization.id, categoryId: office.id, name: "MATERIAL GASTABLE" } }),
+    prisma.subcategory.create({ data: { organizationId: organization.id, categoryId: technology.id, name: "COMPUTADORAS" } }),
+    prisma.subcategory.create({ data: { organizationId: organization.id, categoryId: services.id, name: "MANTENIMIENTO" } }),
+  ]);
+
+  await prisma.costCenter.createMany({
+    data: [
+      { organizationId: organization.id, code: "CC-204", name: "TORRE NORTE", description: "OBRA ELÉCTRICA Y CIVIL" },
+      { organizationId: organization.id, code: "ADM-010", name: "ADMINISTRACIÓN", description: "OPERACIONES DE OFICINA" },
+    ],
+  });
 
   const [acme, delta, nexans, truper] = await Promise.all(
     ["Acme", "Delta", "Nexans", "Truper"].map((name) => prisma.brand.create({ data: { name, organizationId: organization.id } })),
@@ -125,6 +139,7 @@ async function main() {
       type: "MATERIAL",
       unit: "funda",
       categoryId: construction.id,
+      subcategoryId: concreteSubcategory.id,
       brandId: acme.id,
       description: "Cemento para obras generales.",
     },
@@ -137,6 +152,7 @@ async function main() {
       type: "MATERIAL",
       unit: "metro",
       categoryId: electrical.id,
+      subcategoryId: wiringSubcategory.id,
       brandId: nexans.id,
     },
   });
@@ -148,6 +164,7 @@ async function main() {
       type: "MATERIAL",
       unit: "unidad",
       categoryId: technology.id,
+      subcategoryId: computerSubcategory.id,
       brandId: delta.id,
     },
   });
@@ -159,6 +176,7 @@ async function main() {
       type: "MATERIAL",
       unit: "caja",
       categoryId: office.id,
+      subcategoryId: officeSubcategory.id,
     },
   });
 
@@ -169,6 +187,7 @@ async function main() {
       type: "SERVICIO",
       unit: "hora",
       categoryId: services.id,
+      subcategoryId: maintenanceSubcategory.id,
       brandId: truper.id,
     },
   });
@@ -179,6 +198,8 @@ async function main() {
       organizationId: organization.id,
       rnc: "101234567",
       category: "Construccion",
+      categoryId: construction.id,
+      subcategoryId: concreteSubcategory.id,
       city: "Santo Domingo",
       address: "Av. John F. Kennedy 120",
       phone: "809-555-0101",
@@ -217,6 +238,8 @@ async function main() {
       organizationId: organization.id,
       rnc: "101765432",
       category: "Electrico",
+      categoryId: electrical.id,
+      subcategoryId: wiringSubcategory.id,
       city: "Santiago",
       phone: "809-555-0202",
       whatsapp: "18095550202",
@@ -249,6 +272,8 @@ async function main() {
       organizationId: organization.id,
       rnc: "130998877",
       category: "Oficina",
+      categoryId: office.id,
+      subcategoryId: officeSubcategory.id,
       city: "Santo Domingo",
       phone: "809-555-0303",
       email: "servicio@ofimax.local",
@@ -279,6 +304,8 @@ async function main() {
       organizationId: organization.id,
       rnc: "132222111",
       category: "Tecnologia",
+      categoryId: technology.id,
+      subcategoryId: computerSubcategory.id,
       city: "Punta Cana",
       phone: "809-555-0404",
       whatsapp: "18095550404",
@@ -312,6 +339,8 @@ async function main() {
       organizationId: organization.id,
       rnc: "124440001",
       category: "Servicios",
+      categoryId: services.id,
+      subcategoryId: maintenanceSubcategory.id,
       city: "La Vega",
       phone: "809-555-0505",
       email: "operaciones@sinorte.local",
@@ -333,6 +362,26 @@ async function main() {
       tags: {
         create: [{ tagId: local.id }],
       },
+    },
+  });
+
+  await prisma.warehouse.create({
+    data: {
+      organizationId: organization.id,
+      name: "ALMACÉN GENERAL",
+      code: "AG-01",
+      type: "GENERAL",
+      location: "SEDE PRINCIPAL",
+      balances: { create: [{ itemId: cable.id, quantity: "120.00" }, { itemId: stationery.id, quantity: "25.00" }] },
+    },
+  });
+  await prisma.warehouse.create({
+    data: {
+      organizationId: organization.id,
+      name: "ALMACÉN TORRE NORTE",
+      code: "PR-01",
+      type: "PROJECT",
+      location: "PROYECTO TORRE NORTE",
     },
   });
 

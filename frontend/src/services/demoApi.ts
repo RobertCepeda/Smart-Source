@@ -13,6 +13,7 @@ import type {
   CatalogItemDetailResponse,
   CatalogItemPayload,
   CatalogSubcategory,
+  CostCenter,
   HealthResponse,
   OrganizationWorkspaceResponse,
   AuditLog,
@@ -37,6 +38,7 @@ import type {
   SupportTicket,
   UnitOfMeasure,
   Warehouse,
+  InventoryTransfer,
 } from "./api";
 
 export const demoToken = "smart-source-static-demo-token";
@@ -334,6 +336,11 @@ let purchaseOrders: PurchaseOrder[] = [
   makeOrder("po_5", "OC-2026-005", "sup_ferreteria", "RECIBIDA", [{ itemId: "item_maintenance", quantity: 10, unitPrice: 950 }]),
 ];
 
+let costCenters: CostCenter[] = [
+  { id: "cc_204", code: "CC-204", name: "TORRE NORTE", description: "OBRA ELÉCTRICA Y CIVIL", isActive: true, createdAt: now, updatedAt: now, _count: { quoteRequests: 1, purchaseOrders: 0 } },
+  { id: "cc_adm", code: "ADM-010", name: "ADMINISTRACIÓN", description: "OPERACIONES DE OFICINA", isActive: true, createdAt: now, updatedAt: now, _count: { quoteRequests: 1, purchaseOrders: 0 } },
+];
+
 let quoteRequests: QuoteRequest[] = [
   makeQuoteRequest("qr_1", "SC-2026-00001", "Torre Norte - Eléctrico", "CC-204", [
     { description: "Cable eléctrico THHN 12 rojo", quantity: 120, unit: "metro", technicalSpecs: "Certificación UL, cobre, color rojo." },
@@ -372,7 +379,6 @@ let warehouses: Warehouse[] = [
     name: "ALMACÉN GENERAL",
     code: "AG-01",
     type: "GENERAL",
-    project: null,
     location: "SEDE PRINCIPAL",
     isActive: true,
     createdAt: now,
@@ -384,7 +390,22 @@ let warehouses: Warehouse[] = [
     movements: [],
     _count: { balances: 2, movements: 2, purchaseOrders: 2 },
   },
+  {
+    id: "warehouse_project",
+    name: "ALMACÉN TORRE NORTE",
+    code: "PR-01",
+    type: "PROJECT",
+    location: "PROYECTO TORRE NORTE",
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+    balances: [],
+    movements: [],
+    _count: { balances: 0, movements: 0, purchaseOrders: 0 },
+  },
 ];
+
+let inventoryTransfers: InventoryTransfer[] = [];
 
 let auditLogs: AuditLog[] = [
   {
@@ -465,7 +486,12 @@ export const demoApi = {
       id,
       name: payload.name,
       rnc: payload.rnc || null,
-      category: null,
+      category: categories.find((entry) => entry.id === payload.categoryId)?.name ?? null,
+      subcategory: subcategories.find((entry) => entry.id === payload.subcategoryId)?.name ?? null,
+      categoryId: payload.categoryId || null,
+      subcategoryId: payload.subcategoryId || null,
+      categoryRecord: categories.find((entry) => entry.id === payload.categoryId) ?? null,
+      subcategoryRecord: subcategories.find((entry) => entry.id === payload.subcategoryId) ?? null,
       city: payload.city || null,
       address: payload.address || null,
       phone: payload.phone || null,
@@ -508,7 +534,12 @@ export const demoApi = {
     Object.assign(current, {
       name: payload.name,
       rnc: payload.rnc || null,
-      category: current.category,
+      category: categories.find((entry) => entry.id === payload.categoryId)?.name ?? null,
+      subcategory: subcategories.find((entry) => entry.id === payload.subcategoryId)?.name ?? null,
+      categoryId: payload.categoryId || null,
+      subcategoryId: payload.subcategoryId || null,
+      categoryRecord: categories.find((entry) => entry.id === payload.categoryId) ?? null,
+      subcategoryRecord: subcategories.find((entry) => entry.id === payload.subcategoryId) ?? null,
       city: payload.city || null,
       address: payload.address || null,
       phone: payload.phone || null,
@@ -635,6 +666,10 @@ export const demoApi = {
     ok({ orders: purchaseOrders.filter((order) => orderMatches(order, filters)) }),
   createPurchaseOrder: (payload: PurchaseOrderPayload) => {
     const order = makeOrder(`po_${Date.now()}`, `OC-2026-${String(purchaseOrders.length + 1).padStart(3, "0")}`, payload.supplierId, "BORRADOR", payload.lines);
+    const center = costCenters.find((entry) => entry.id === payload.costCenterId) ?? null;
+    order.costCenterId = center?.id ?? null;
+    order.costCenter = center ? `${center.code} - ${center.name}` : payload.costCenter ?? null;
+    order.costCenterRecord = center;
     purchaseOrders = [order, ...purchaseOrders];
     return ok({ order });
   },
@@ -664,6 +699,7 @@ export const demoApi = {
       payload.deadline,
       payload.observations,
       payload.supplierIds ?? [],
+      payload.costCenterId,
     );
     quoteRequests = [request, ...quoteRequests];
     quoteRequestDraft = null;
@@ -868,13 +904,12 @@ export const demoApi = {
     return ok({ user: { id: demoUser.id, name: demoUser.name, email: demoUser.email, role: demoUser.role, isActive: payload.isActive ?? true, lastLoginAt: now, createdAt: now } });
   },
   listWarehouses: () => ok({ warehouses }),
-  createWarehouse: (payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; project?: string; location?: string }) => {
+  createWarehouse: (payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; location?: string }) => {
     const warehouse: Warehouse = {
       id: `warehouse_${Date.now()}`,
       name: payload.name.toLocaleUpperCase("es"),
       code: payload.code.toLocaleUpperCase("es"),
       type: payload.type,
-      project: payload.project?.toLocaleUpperCase("es") ?? null,
       location: payload.location?.toLocaleUpperCase("es") ?? null,
       isActive: true,
       createdAt: new Date().toISOString(),
@@ -901,6 +936,7 @@ export const demoApi = {
       warehouseId: warehouse.id,
       itemId: item.id,
       orderId: null,
+      transferId: null,
       type: payload.type,
       quantity: Math.abs(payload.quantity).toFixed(2),
       unit: payload.unit ?? item.unit,
@@ -913,6 +949,31 @@ export const demoApi = {
     };
     warehouse.movements = [movement, ...warehouse.movements];
     return ok({ balance, movement });
+  },
+  listCostCenters: () => ok({ costCenters }),
+  createCostCenter: (payload: { code: string; name: string; description?: string }) => {
+    const costCenter: CostCenter = { id: `cc_${Date.now()}`, code: payload.code.toLocaleUpperCase("es"), name: payload.name.toLocaleUpperCase("es"), description: payload.description?.toLocaleUpperCase("es") ?? null, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _count: { quoteRequests: 0, purchaseOrders: 0 } };
+    costCenters = [...costCenters, costCenter];
+    return ok({ costCenter });
+  },
+  updateCostCenter: (id: string, payload: Partial<{ code: string; name: string; description: string; isActive: boolean }>) => {
+    const costCenter = costCenters.find((entry) => entry.id === id) ?? costCenters[0];
+    Object.assign(costCenter, { code: payload.code?.toLocaleUpperCase("es") ?? costCenter.code, name: payload.name?.toLocaleUpperCase("es") ?? costCenter.name, description: payload.description === undefined ? costCenter.description : payload.description.toLocaleUpperCase("es"), isActive: payload.isActive ?? costCenter.isActive, updatedAt: new Date().toISOString() });
+    return ok({ costCenter });
+  },
+  listInventoryTransfers: () => ok({ transfers: inventoryTransfers }),
+  createInventoryTransfer: (payload: { originWarehouseId: string; destinationWarehouseId: string; itemId: string; quantity: number; notes?: string }) => {
+    const origin = warehouses.find((entry) => entry.id === payload.originWarehouseId) ?? warehouses[0];
+    const destination = warehouses.find((entry) => entry.id === payload.destinationWarehouseId) ?? warehouses[1];
+    const originBalance = origin.balances.find((entry) => entry.itemId === payload.itemId) ?? origin.balances[0];
+    const item = originBalance.item;
+    originBalance.quantity = (Number(originBalance.quantity) - payload.quantity).toFixed(2);
+    let destinationBalance = destination.balances.find((entry) => entry.itemId === item.id);
+    if (!destinationBalance) { destinationBalance = { id: `balance_${Date.now()}`, itemId: item.id, quantity: "0.00", item }; destination.balances.push(destinationBalance); }
+    destinationBalance.quantity = (Number(destinationBalance.quantity) + payload.quantity).toFixed(2);
+    const transfer: InventoryTransfer = { id: `transfer_${Date.now()}`, originWarehouseId: origin.id, destinationWarehouseId: destination.id, itemId: item.id, quantity: payload.quantity.toFixed(2), unit: item.unit, notes: payload.notes ?? null, createdAt: new Date().toISOString(), originWarehouse: { id: origin.id, name: origin.name, code: origin.code }, destinationWarehouse: { id: destination.id, name: destination.name, code: destination.code }, item: { id: item.id, name: item.name, unit: item.unit }, createdBy: { id: demoUser.id, name: demoUser.name } };
+    inventoryTransfers = [transfer, ...inventoryTransfers];
+    return ok({ transfer });
   },
   getAdminOverview: () =>
     ok<{ overview: AdminOverview }>({
@@ -989,7 +1050,9 @@ function makeOrder(
     quoteRequestId: null,
     warehouseId: null,
     receivedAt: null,
+    costCenterId: null,
     costCenter: null,
+    costCenterRecord: null,
     status,
     issueDate: now,
     currency: "DOP",
@@ -1026,13 +1089,17 @@ function makeQuoteRequest(
   deadline?: string,
   observations?: string,
   supplierIds: string[] = [],
+  costCenterId?: string,
 ): QuoteRequest {
+  const center = costCenters.find((entry) => entry.id === costCenterId) ?? null;
   const request: QuoteRequest = {
     id,
     number,
     status: "BORRADOR",
     project,
-    costCenter,
+    costCenterId: center?.id ?? null,
+    costCenter: center ? `${center.code} - ${center.name}` : costCenter,
+    costCenterRecord: center,
     requesterName: requesterName || demoUser.name,
     deadline: deadline ? `${deadline}T23:59:59.999Z` : null,
     observations: observations || null,

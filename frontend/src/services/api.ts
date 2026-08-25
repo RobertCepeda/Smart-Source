@@ -72,6 +72,11 @@ export type Supplier = {
   name: string;
   rnc: string | null;
   category: string | null;
+  subcategory?: string | null;
+  categoryId?: string | null;
+  subcategoryId?: string | null;
+  categoryRecord?: CatalogEntity | null;
+  subcategoryRecord?: CatalogSubcategory | null;
   city: string | null;
   address: string | null;
   phone: string | null;
@@ -93,6 +98,8 @@ export type Supplier = {
 export type SupplierPayload = {
   name: string;
   rnc: string;
+  categoryId?: string;
+  subcategoryId?: string;
   city?: string;
   address?: string;
   phone: string;
@@ -308,7 +315,9 @@ export type PurchaseOrder = {
   quoteRequestId: string | null;
   warehouseId: string | null;
   receivedAt: string | null;
+  costCenterId: string | null;
   costCenter: string | null;
+  costCenterRecord: Pick<CostCenter, "id" | "code" | "name" | "isActive"> | null;
   status: PurchaseOrderStatus;
   issueDate: string;
   currency: string;
@@ -329,6 +338,7 @@ export type PurchaseOrderPayload = {
   currency: string;
   taxRate: number;
   notes?: string;
+  costCenterId?: string;
   costCenter?: string;
   quoteRequestId?: string;
   lines: Array<{
@@ -468,7 +478,9 @@ export type QuoteRequest = {
   number: string;
   status: QuoteRequestStatus;
   project: string;
+  costCenterId: string | null;
   costCenter: string | null;
+  costCenterRecord: Pick<CostCenter, "id" | "code" | "name" | "isActive"> | null;
   requesterName: string;
   deadline: string | null;
   observations: string | null;
@@ -489,6 +501,7 @@ export type QuoteRequest = {
 
 export type QuoteRequestPayload = {
   project: string;
+  costCenterId?: string;
   costCenter?: string;
   requesterName?: string;
   deadline?: string;
@@ -504,6 +517,7 @@ export type QuoteRequestPayload = {
 
 export type QuoteRequestDraftPayload = {
   project: string;
+  costCenterId: string;
   costCenter: string;
   requesterName: string;
   deadline: string;
@@ -636,7 +650,8 @@ export type InventoryMovement = {
   warehouseId: string;
   itemId: string;
   orderId: string | null;
-  type: "ENTRADA" | "SALIDA" | "AJUSTE";
+  transferId: string | null;
+  type: "ENTRADA" | "SALIDA" | "AJUSTE" | "TRANSFERENCIA_SALIDA" | "TRANSFERENCIA_ENTRADA";
   quantity: string;
   unit: string | null;
   reference: string | null;
@@ -652,7 +667,6 @@ export type Warehouse = {
   name: string;
   code: string;
   type: "GENERAL" | "PROJECT";
-  project: string | null;
   location: string | null;
   isActive: boolean;
   createdAt: string;
@@ -665,6 +679,32 @@ export type Warehouse = {
   }>;
   movements: InventoryMovement[];
   _count: { balances: number; movements: number; purchaseOrders: number };
+};
+
+export type CostCenter = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count: { quoteRequests: number; purchaseOrders: number };
+};
+
+export type InventoryTransfer = {
+  id: string;
+  originWarehouseId: string;
+  destinationWarehouseId: string;
+  itemId: string;
+  quantity: string;
+  unit: string | null;
+  notes: string | null;
+  createdAt: string;
+  originWarehouse: Pick<Warehouse, "id" | "name" | "code">;
+  destinationWarehouse: Pick<Warehouse, "id" | "name" | "code">;
+  item: Pick<CatalogItem, "id" | "name" | "unit">;
+  createdBy: { id: string; name: string } | null;
 };
 
 export type AiDocumentSummary = {
@@ -1442,11 +1482,48 @@ export async function listWarehousesRequest(token: string) {
   return apiRequest<{ warehouses: Warehouse[] }>("/warehouses", { headers: authHeaders(token) });
 }
 
-export async function createWarehouseRequest(token: string, payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; project?: string; location?: string }) {
+export async function createWarehouseRequest(token: string, payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; location?: string }) {
   if (isDemoMode) {
     return demoApi.createWarehouse(payload);
   }
   return apiRequest<{ warehouse: Warehouse }>("/warehouses", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCostCentersRequest(token: string) {
+  if (isDemoMode) return demoApi.listCostCenters();
+  return apiRequest<{ costCenters: CostCenter[] }>("/cost-centers", { headers: authHeaders(token) });
+}
+
+export async function createCostCenterRequest(token: string, payload: { code: string; name: string; description?: string }) {
+  if (isDemoMode) return demoApi.createCostCenter(payload);
+  return apiRequest<{ costCenter: CostCenter }>("/cost-centers", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCostCenterRequest(token: string, id: string, payload: Partial<{ code: string; name: string; description: string; isActive: boolean }>) {
+  if (isDemoMode) return demoApi.updateCostCenter(id, payload);
+  return apiRequest<{ costCenter: CostCenter }>(`/cost-centers/${id}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listInventoryTransfersRequest(token: string) {
+  if (isDemoMode) return demoApi.listInventoryTransfers();
+  return apiRequest<{ transfers: InventoryTransfer[] }>("/warehouses/transfers", { headers: authHeaders(token) });
+}
+
+export async function createInventoryTransferRequest(token: string, payload: { originWarehouseId: string; destinationWarehouseId: string; itemId: string; quantity: number; notes?: string }) {
+  if (isDemoMode) return demoApi.createInventoryTransfer(payload);
+  return apiRequest<{ transfer: InventoryTransfer }>("/warehouses/transfers", {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify(payload),

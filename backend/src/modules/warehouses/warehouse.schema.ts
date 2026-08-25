@@ -8,8 +8,15 @@ export const createWarehouseSchema = z.object({
   name: z.string().trim().min(2, "El nombre es obligatorio"),
   code: z.string().trim().min(2, "El código es obligatorio").max(20),
   type: z.enum(["GENERAL", "PROJECT"]).default("GENERAL"),
-  project: z.string().trim().optional(),
   location: z.string().trim().optional(),
+});
+
+export const inventoryTransferSchema = z.object({
+  originWarehouseId: z.string().min(1, "Selecciona el almacén de origen"),
+  destinationWarehouseId: z.string().min(1, "Selecciona el almacén de destino"),
+  itemId: z.string().min(1, "Selecciona el artículo"),
+  quantity: z.coerce.number().positive("La cantidad debe ser mayor que cero"),
+  notes: z.string().trim().max(500).optional(),
 });
 
 export const inventoryMovementSchema = z.object({

@@ -7,6 +7,7 @@ import {
   Building2,
   Command,
   ClipboardList,
+  CircleDollarSign,
   Headphones,
   History,
   LayoutDashboard,
@@ -54,6 +55,7 @@ const navigationGroups: NavigationGroup[] = [
     label: "Empresa",
     items: [
       { label: "Organizaciones", path: "/organizations", icon: Network },
+      { label: "Centros de costo", path: "/cost-centers", icon: CircleDollarSign },
       { label: "Centro de Atención", path: "/support", icon: Headphones },
     ],
   },
@@ -76,6 +78,7 @@ const navigationGroups: NavigationGroup[] = [
 ];
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  const { logout, user } = useAuth();
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-border bg-white">
       <div className="flex h-12 items-center border-b border-border px-3">
@@ -112,10 +115,12 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-border p-2.5">
-        <div className="rounded-lg bg-slate-50 p-2.5">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Módulo actual</p>
-          <p className="mt-1 text-xs font-semibold text-ink">Módulos listos</p>
-          <p className="mt-1 text-[11px] leading-5 text-slate-500">Base completa para empezar a pulir detalles.</p>
+        <div className="flex items-center gap-1 rounded-lg border border-transparent p-1 transition hover:border-border hover:bg-slate-50">
+          <NavLink to="/settings" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1.5" title="Abrir configuración del usuario">
+            <UserAvatar user={user} />
+            <div className="min-w-0"><p className="truncate text-xs font-bold text-ink">{user?.name}</p><p className="truncate text-[10px] text-slate-500">{user?.email}</p></div>
+          </NavLink>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Cerrar sesión" onClick={logout}><LogOut className="h-3.5 w-3.5" /></Button>
         </div>
       </div>
     </aside>
@@ -123,7 +128,6 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function Topbar({ onMenu }: { onMenu: () => void }) {
-  const { logout, user } = useAuth();
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -170,21 +174,6 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         <Button type="button" size="sm" onClick={() => navigate("/registration")}>
           <Plus className="h-4 w-4" />
           <span className="hidden sm:inline">Nuevo</span>
-        </Button>
-        <button
-          type="button"
-          className="hidden h-9 max-w-[260px] min-w-0 items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-slate-50 md:flex"
-          onClick={() => navigate("/settings")}
-          title="Abrir perfil"
-        >
-          <UserAvatar user={user} />
-          <div className="min-w-0">
-            <p className="truncate text-xs font-bold text-ink">{user?.name}</p>
-            <p className="truncate text-[11px] text-slate-500">{user?.company ?? user?.email}</p>
-          </div>
-        </button>
-        <Button type="button" variant="ghost" size="icon" title="Cerrar sesion" onClick={logout}>
-          <LogOut className="h-4 w-4" />
         </Button>
       </div>
     </header>

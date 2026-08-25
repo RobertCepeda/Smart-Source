@@ -41,6 +41,7 @@ type ExtractedQuoteLine = {
 
 const quoteRequestInclude = {
   requester: { select: { id: true, name: true, email: true } },
+  costCenterRef: { select: { id: true, code: true, name: true, isActive: true } },
   items: { orderBy: { lineNumber: "asc" as const } },
   attachments: {
     orderBy: { createdAt: "desc" as const },
@@ -113,7 +114,9 @@ function mapQuoteRequest(request: any) {
     number: request.number,
     status: request.status,
     project: request.project,
+    costCenterId: request.costCenterId,
     costCenter: request.costCenter,
+    costCenterRecord: request.costCenterRef,
     requesterName: request.requesterName,
     deadline: request.deadline,
     observations: request.observations,
@@ -343,12 +346,20 @@ export async function createQuoteRequest(
   input: CreateQuoteRequestInput,
   attachments: Express.Multer.File[] = [],
 ) {
-  const [requester, suppliers] = await Promise.all([
+  const [requester, suppliers, costCenter] = await Promise.all([
     requesterId
       ? prisma.user.findFirst({ where: { id: requesterId, organizationId }, select: { name: true } })
       : Promise.resolve(null),
     ensureSupplierIds(organizationId, input.supplierIds ?? []),
+    input.costCenterId
+      ? prisma.costCenter.findFirst({ where: { id: input.costCenterId, organizationId, isActive: true } })
+      : Promise.resolve(null),
   ]);
+  if (input.costCenterId && !costCenter) {
+    const error = new Error("El centro de costo seleccionado no está disponible.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
 
   const request = await prisma.$transaction(async (tx) => {
     const number = await nextQuoteRequestNumber(tx);
@@ -359,7 +370,8 @@ export async function createQuoteRequest(
         requesterId,
         number,
         project: input.project.trim(),
-        costCenter: cleanString(input.costCenter),
+        costCenterId: costCenter?.id,
+        costCenter: costCenter ? `${costCenter.code} - ${costCenter.name}` : cleanString(input.costCenter),
         requesterName: cleanString(input.requesterName) ?? requester?.name ?? "Solicitante",
         deadline: parseDeadline(input.deadline),
         observations: cleanString(input.observations),

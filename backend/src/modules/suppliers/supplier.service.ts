@@ -11,7 +11,11 @@ const supplierSelect = {
   id: true,
   name: true,
   rnc: true,
+  categoryId: true,
+  subcategoryId: true,
   category: true,
+  categoryRef: { select: { id: true, name: true } },
+  subcategoryRef: { select: { id: true, name: true, categoryId: true } },
   city: true,
   address: true,
   phone: true,
@@ -64,6 +68,8 @@ function supplierData(input: Partial<SupplierCreateInput>) {
     facebook: upperString(input.facebook),
     notes: upperString(input.notes),
     rating: input.rating,
+    categoryId: input.categoryId === undefined ? undefined : cleanString(input.categoryId) ?? null,
+    subcategoryId: input.subcategoryId === undefined ? undefined : cleanString(input.subcategoryId) ?? null,
   };
 }
 
@@ -72,7 +78,12 @@ function mapSupplier(supplier: any) {
     id: supplier.id,
     name: supplier.name,
     rnc: supplier.rnc,
-    category: supplier.category,
+    categoryId: supplier.categoryId,
+    subcategoryId: supplier.subcategoryId,
+    category: supplier.categoryRef?.name ?? supplier.category,
+    subcategory: supplier.subcategoryRef?.name ?? null,
+    categoryRecord: supplier.categoryRef,
+    subcategoryRecord: supplier.subcategoryRef,
     city: supplier.city,
     address: supplier.address,
     phone: supplier.phone,
@@ -98,6 +109,41 @@ function mapSupplier(supplier: any) {
       leadTimeDays: item.leadTimeDays,
     })),
   };
+}
+
+async function validateClassification(
+  organizationId: string,
+  categoryId?: string | null,
+  subcategoryId?: string | null,
+) {
+  const cleanCategoryId = cleanString(categoryId);
+  const cleanSubcategoryId = cleanString(subcategoryId);
+
+  if (!cleanCategoryId && cleanSubcategoryId) {
+    const error = new Error("Selecciona una categoría antes de elegir la subcategoría.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+
+  if (!cleanCategoryId) return;
+
+  const category = await prisma.category.findFirst({ where: { id: cleanCategoryId, organizationId } });
+  if (!category) {
+    const error = new Error("La categoría seleccionada no pertenece a tu organización.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+
+  if (cleanSubcategoryId) {
+    const subcategory = await prisma.subcategory.findFirst({
+      where: { id: cleanSubcategoryId, categoryId: cleanCategoryId, organizationId },
+    });
+    if (!subcategory) {
+      const error = new Error("La subcategoría seleccionada no corresponde a la categoría.");
+      (error as Error & { status: number }).status = 400;
+      throw error;
+    }
+  }
 }
 
 async function getSupplierOrThrow(organizationId: string, id: string) {
@@ -222,6 +268,8 @@ export async function listSuppliers(organizationId: string, query: SupplierQuery
               { name: { contains: search, mode: "insensitive" as const } },
               { rnc: { contains: search, mode: "insensitive" as const } },
               { category: { contains: search, mode: "insensitive" as const } },
+              { categoryRef: { name: { contains: search, mode: "insensitive" as const } } },
+              { subcategoryRef: { name: { contains: search, mode: "insensitive" as const } } },
               { city: { contains: search, mode: "insensitive" as const } },
               { address: { contains: search, mode: "insensitive" as const } },
               { phone: { contains: search, mode: "insensitive" as const } },
@@ -253,6 +301,7 @@ export async function getSupplierById(organizationId: string, id: string) {
 }
 
 export async function createSupplier(organizationId: string, actorId: string, input: SupplierCreateInput) {
+  await validateClassification(organizationId, input.categoryId, input.subcategoryId);
   const supplier = await prisma.$transaction(async (tx) => {
     const created = await tx.supplier.create({
       data: {
@@ -290,6 +339,11 @@ export async function createSupplier(organizationId: string, actorId: string, in
 
 export async function updateSupplier(organizationId: string, actorId: string, id: string, input: SupplierUpdateInput) {
   const previous = await getSupplierOrThrow(organizationId, id);
+  await validateClassification(
+    organizationId,
+    input.categoryId === undefined ? previous.categoryId : input.categoryId,
+    input.subcategoryId === undefined ? previous.subcategoryId : input.subcategoryId,
+  );
 
   const supplier = await prisma.$transaction(async (tx) => {
     await tx.supplier.update({

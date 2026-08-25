@@ -20,6 +20,7 @@ export const listQuoteRequestsQuerySchema = z.object({
 
 export const createQuoteRequestSchema = z.object({
   project: z.string().trim().min(2, "Indica el proyecto o centro de costo.").max(160),
+  costCenterId: z.string().trim().optional(),
   costCenter: z.string().trim().max(80).optional(),
   requesterName: z.string().trim().max(120).optional(),
   deadline: z.string().trim().optional(),
@@ -49,6 +50,7 @@ const quoteRequestDraftLineSchema = z.object({
 
 export const quoteRequestDraftSchema = z.object({
   project: z.string().trim().max(160).optional().default(""),
+  costCenterId: z.string().trim().optional().default(""),
   costCenter: z.string().trim().max(80).optional().default(""),
   requesterName: z.string().trim().max(120).optional().default(""),
   deadline: z.string().trim().max(40).optional().default(""),
