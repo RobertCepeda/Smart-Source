@@ -16,7 +16,12 @@ export const inventoryTransferSchema = z.object({
   destinationWarehouseId: z.string().min(1, "Selecciona el almacén de destino"),
   itemId: z.string().min(1, "Selecciona el artículo"),
   quantity: z.coerce.number().positive("La cantidad debe ser mayor que cero"),
+  driverId: z.string().min(1, "Selecciona el chofer responsable"),
   notes: z.string().trim().max(500).optional(),
+});
+
+export const inventoryTransferIdParamsSchema = z.object({
+  transferId: z.string().min(1),
 });
 
 export const inventoryMovementSchema = z.object({

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BrowserRouter, HashRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, HashRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { PublicRoute } from "./components/auth/PublicRoute";
@@ -12,7 +12,6 @@ import { CostCenters } from "./pages/CostCenters";
 import { Dashboard } from "./pages/Dashboard";
 import { Organizations } from "./pages/Organizations";
 import { PriceHistory } from "./pages/PriceHistory";
-import { PurchaseHistory } from "./pages/PurchaseHistory";
 import { PurchaseOrders } from "./pages/PurchaseOrders";
 import { QuoteRequests } from "./pages/QuoteRequests";
 import { Registration } from "./pages/Registration";
@@ -71,17 +70,19 @@ function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="/suppliers" element={<SuppliersDirectory />} />
+            <Route path="/suppliers/new" element={<Registration />} />
+            <Route path="/suppliers/:id/edit" element={<Registration />} />
             <Route path="/suppliers/:id" element={<SupplierDetail />} />
             <Route path="/organizations" element={<Organizations />} />
             <Route path="/cost-centers" element={<CostCenters />} />
             <Route path="/catalog" element={<Catalog />} />
             <Route path="/catalog/:id" element={<CatalogItemDetail />} />
             <Route path="/search" element={<SmartSearch />} />
-            <Route path="/registration" element={<Registration />} />
+            <Route path="/registration" element={<Navigate to="/suppliers/new" replace />} />
             <Route path="/purchase-orders" element={<PurchaseOrders />} />
             <Route path="/warehouses" element={<Warehouses />} />
             <Route path="/quote-requests" element={<QuoteRequests />} />
-            <Route path="/purchase-history" element={<PurchaseHistory />} />
+            <Route path="/purchase-history" element={<Navigate to="/purchase-orders?view=history" replace />} />
             <Route path="/price-history" element={<PriceHistory />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/ai-consult" element={<AiConsult />} />

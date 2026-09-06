@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calculator, CheckCircle2, ClipboardList, Plus, Send, Trash2, XCircle } from "lucide-react";
+import { Activity, Calculator, CheckCircle2, ClipboardList, History, Plus, Send, Trash2, XCircle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { useAuth } from "../contexts/AuthContext";
+import { PurchaseHistory } from "./PurchaseHistory";
 import {
   createPurchaseOrderRequest,
   listCatalogItemsRequest,
@@ -53,6 +55,8 @@ const statusTone: Record<PurchaseOrderStatus, "slate" | "green" | "amber" | "blu
 export function PurchaseOrders() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [viewMode, setViewMode] = useState<"orders" | "history">(searchParams.get("view") === "history" ? "history" : "orders");
   const [supplierId, setSupplierId] = useState("");
   const [currency, setCurrency] = useState("DOP");
   const [taxRate, setTaxRate] = useState("0.18");
@@ -60,6 +64,7 @@ export function PurchaseOrders() {
   const [costCenterId, setCostCenterId] = useState("");
   const [costCenter, setCostCenter] = useState("");
   const [quoteRequestId, setQuoteRequestId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
   const [lines, setLines] = useState<LineForm[]>([{ ...emptyLine }]);
   const [statusFilter, setStatusFilter] = useState<PurchaseOrderStatus | "">("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,6 +85,7 @@ export function PurchaseOrders() {
     queryKey: ["purchase-orders", statusFilter],
     queryFn: () => listPurchaseOrdersRequest(token!, statusFilter ? { status: statusFilter } : {}),
     enabled: Boolean(token),
+    refetchInterval: 5000,
   });
 
   const quoteRequestsQuery = useQuery({ queryKey: ["quote-requests", "order-form"], queryFn: () => listQuoteRequestsRequest(token!), enabled: Boolean(token) });
@@ -130,6 +136,7 @@ export function PurchaseOrders() {
       setCostCenterId("");
       setCostCenter("");
       setQuoteRequestId("");
+      setWarehouseId("");
       setLines([{ ...emptyLine }]);
       await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
@@ -198,8 +205,15 @@ export function PurchaseOrders() {
       return;
     }
 
+    const hasMaterials = validLines.some((line) => items.find((item) => item.id === line.itemId)?.type === "MATERIAL");
+    if (hasMaterials && !warehouseId) {
+      setNotice("Selecciona el almacén de destino de esta orden.");
+      return;
+    }
+
     createMutation.mutate({
       supplierId,
+      warehouseId: warehouseId || undefined,
       currency,
       taxRate: Number(taxRate) || 0,
       notes,
@@ -215,8 +229,17 @@ export function PurchaseOrders() {
       <PageHeader
         eyebrow="Módulo 4"
         title="Órdenes de Compra"
-        description="Crea órdenes con suplidor, líneas, precios, ITBIS y seguimiento de estado."
+        description="Crea órdenes, asigna su almacén de destino y sigue cada cambio en vivo."
       />
+
+      <section className="flex w-fit gap-1 rounded-lg border border-border bg-white p-1">
+        <Button type="button" size="sm" variant={viewMode === "orders" ? "default" : "ghost"} onClick={() => { setViewMode("orders"); setSearchParams({}); }}><ClipboardList className="h-4 w-4" />Órdenes</Button>
+        <Button type="button" size="sm" variant={viewMode === "history" ? "default" : "ghost"} onClick={() => { setViewMode("history"); setSearchParams({ view: "history" }); }}><History className="h-4 w-4" />Historial</Button>
+      </section>
+
+      {viewMode === "history" ? <PurchaseHistory embedded /> : null}
+
+      {viewMode === "orders" ? <>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Órdenes" value={stats.count.toString()} />
@@ -287,6 +310,14 @@ export function PurchaseOrders() {
                   </select>
                 </label>
               </div>
+
+              <label className="block">
+                <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Almacén de destino</span>
+                <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)}>
+                  <option value="">Selecciona dónde se recibirá la orden</option>
+                  {warehouses.filter((warehouse) => warehouse.isActive).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} - {warehouse.name}</option>)}
+                </select>
+              </label>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -382,6 +413,7 @@ export function PurchaseOrders() {
           </CardContent>
         </Card>
       </section>
+      </> : null}
     </div>
   );
 }
@@ -488,7 +520,7 @@ function OrderCard({
             {new Date(order.issueDate).toLocaleDateString()} - {order.lines.length} líneas
           </p>
           {order.costCenter ? <p className="mt-1 text-xs font-semibold text-brand-700">Centro de costo: {order.costCenter}</p> : null}
-          {order.warehouse ? <p className="mt-1 text-xs text-slate-500">Recibida en {order.warehouse.name}</p> : null}
+          {order.warehouse ? <p className="mt-1 text-xs font-semibold text-slate-600">Destino: {order.warehouse.name} · {order.warehouse.code}</p> : null}
         </div>
         <div className="text-left sm:text-right">
           <p className="text-base font-bold text-ink">{formatMoney(Number(order.total), order.currency)}</p>
@@ -497,6 +529,12 @@ function OrderCard({
           </p>
         </div>
       </div>
+
+      {order.events?.length ? (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+          {order.events.map((event) => <span key={event.id} className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2 py-1 text-[11px] text-slate-600"><Activity className="h-3 w-3 text-brand-700" />{statusLabels[event.status]} · {event.createdBy?.name ?? "Sistema"} · {new Date(event.createdAt).toLocaleString("es-DO")}</span>)}
+        </div>
+      ) : null}
 
       <div className="mt-3 space-y-1.5">
         {order.lines.slice(0, 3).map((line) => (
@@ -526,11 +564,13 @@ function OrderCard({
       ) : null}
       {order.status === "ENVIADA" ? (
         <div className="mt-3 flex flex-col gap-2 rounded-lg border border-brand-100 bg-brand-50/50 p-2.5 sm:flex-row sm:items-center">
-          {requiresWarehouse ? (
+          {requiresWarehouse && !order.warehouseId ? (
             <select className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-white px-3 text-[13px]" value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)}>
               <option value="">Almacén de recepción</option>
               {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name} · {warehouse.code}</option>)}
             </select>
+          ) : requiresWarehouse ? (
+            <p className="flex-1 text-xs text-slate-600">La mercancía entrará en <strong>{order.warehouse?.name}</strong>.</p>
           ) : (
             <p className="flex-1 text-xs text-slate-600">Esta orden contiene servicios y no afecta inventario.</p>
           )}

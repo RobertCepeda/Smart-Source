@@ -106,7 +106,7 @@ export function SupplierCard({ supplier, onDelete }: SupplierCardProps) {
             {copied === "web" ? <Check className="h-4 w-4 text-brand-600" /> : <Globe className="h-4 w-4" />}
           </Button>
           <Link
-            to={`/registration?edit=${supplier.id}`}
+            to={`/suppliers/${supplier.id}/edit`}
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white text-sm font-semibold text-ink transition hover:bg-slate-50"
             title="Editar"
           >

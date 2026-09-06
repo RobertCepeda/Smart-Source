@@ -80,10 +80,10 @@ export function CatalogItemDetail() {
         title={item.name}
         description={compact([item.category?.name, item.brand?.name, item.unit, item.type]).join(" · ") || "Ficha del catálogo"}
         actions={
-          <Link to="/catalog">
+          <Link to="/search">
             <Button type="button" variant="outline">
               <ArrowLeft className="h-4 w-4" />
-              Catálogo
+              Insumos
             </Button>
           </Link>
         }

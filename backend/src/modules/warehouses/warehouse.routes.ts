@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { validate } from "../../middlewares/validate";
 import { authenticate, requirePermission } from "../auth/auth.middleware";
-import { createInventoryMovement, createInventoryTransfer, createWarehouse, listInventoryTransfers, listWarehouses } from "./warehouse.service";
-import { createWarehouseSchema, inventoryMovementSchema, inventoryTransferSchema, warehouseIdParamsSchema } from "./warehouse.schema";
+import { createInventoryMovement, createInventoryTransfer, createWarehouse, listInventoryTransfers, listWarehouses, receiveInventoryTransfer } from "./warehouse.service";
+import { createWarehouseSchema, inventoryMovementSchema, inventoryTransferIdParamsSchema, inventoryTransferSchema, warehouseIdParamsSchema } from "./warehouse.schema";
 
 export const warehouseRouter = Router();
 
@@ -46,6 +46,16 @@ warehouseRouter.post("/transfers", requirePermission("inventory:write"), validat
   try {
     const transfer = await createInventoryTransfer(organizationId(req), req.user!.id, inventoryTransferSchema.parse(req.body));
     res.status(201).json({ transfer });
+  } catch (error) {
+    next(error);
+  }
+});
+
+warehouseRouter.post("/transfers/:transferId/receive", requirePermission("inventory:write"), validate({ params: inventoryTransferIdParamsSchema }), async (req, res, next) => {
+  try {
+    const { transferId } = inventoryTransferIdParamsSchema.parse(req.params);
+    const transfer = await receiveInventoryTransfer(organizationId(req), req.user!.id, transferId);
+    res.json({ transfer });
   } catch (error) {
     next(error);
   }

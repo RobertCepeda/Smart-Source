@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ChevronLeft, ChevronRight, Save } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
@@ -71,8 +71,9 @@ export function Registration() {
   const { token } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { id: routeEditId } = useParams();
   const [searchParams] = useSearchParams();
-  const editId = searchParams.get("edit");
+  const editId = routeEditId ?? searchParams.get("edit");
   const [activeStep, setActiveStep] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);

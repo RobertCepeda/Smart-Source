@@ -35,7 +35,7 @@ export const smartModules: SmartModule[] = [
     nextWork: "Base lista: organización activa, plan, usuarios y conteos conectados.",
   },
   {
-    title: "Catálogo",
+    title: "Creación de catálogo",
     route: "/catalog",
     status: "base",
     description: "Materiales, servicios, categorías, marcas y asociación con suplidores.",
@@ -43,20 +43,12 @@ export const smartModules: SmartModule[] = [
     nextWork: "Módulo 2: CRUD de materiales/servicios y asociación suplidor-item.",
   },
   {
-    title: "Búsqueda",
+    title: "Insumos",
     route: "/search",
     status: "base",
     description: "Buscador global para suplidores, materiales, servicios, marcas y vendedores.",
     endpoints: ["GET /api/search?q=texto"],
     nextWork: "Módulo 3: búsqueda global conectada con resultados agrupados.",
-  },
-  {
-    title: "Registro",
-    route: "/registration",
-    status: "base",
-    description: "Alta en pasos para suplidores, contactos, catálogo y etiquetas.",
-    endpoints: ["POST /api/suppliers", "POST /api/suppliers/:id/contacts"],
-    nextWork: "Módulo 1: formulario por pasos con validación.",
   },
   {
     title: "Configuración",
@@ -81,14 +73,6 @@ export const smartModules: SmartModule[] = [
     description: "Generador de órdenes con líneas, ITBIS, total y PDF.",
     endpoints: ["POST /api/purchase-orders", "GET /api/purchase-orders/:id/pdf"],
     nextWork: "Módulo 4: cálculo, numeración, estados y listado conectados.",
-  },
-  {
-    title: "Historial",
-    route: "/purchase-history",
-    status: "base",
-    description: "Tabla filtrable de compras por suplidor, fecha, estado y monto.",
-    endpoints: ["GET /api/purchase-orders"],
-    nextWork: "Módulo 5: filtros, detalle y línea de tiempo de compras conectados.",
   },
   {
     title: "Precios",

@@ -315,6 +315,7 @@ export type PurchaseOrder = {
   quoteRequestId: string | null;
   warehouseId: string | null;
   receivedAt: string | null;
+  updatedAt: string;
   costCenterId: string | null;
   costCenter: string | null;
   costCenterRecord: Pick<CostCenter, "id" | "code" | "name" | "isActive"> | null;
@@ -329,11 +330,19 @@ export type PurchaseOrder = {
   warehouse: Pick<Warehouse, "id" | "name" | "code" | "type" | "location"> | null;
   quoteRequest: Pick<QuoteRequest, "id" | "number" | "project" | "costCenter"> | null;
   receivedBy: { id: string; name: string } | null;
+  events: Array<{
+    id: string;
+    status: PurchaseOrderStatus;
+    note: string | null;
+    createdAt: string;
+    createdBy: { id: string; name: string; email: string } | null;
+  }>;
   lines: PurchaseOrderLine[];
 };
 
 export type PurchaseOrderPayload = {
   supplierId: string;
+  warehouseId?: string;
   issueDate?: string;
   currency: string;
   taxRate: number;
@@ -700,11 +709,18 @@ export type InventoryTransfer = {
   quantity: string;
   unit: string | null;
   notes: string | null;
+  status: "PENDIENTE" | "RECIBIDA";
+  driverId: string | null;
+  receivedById: string | null;
+  receivedAt: string | null;
+  updatedAt: string;
   createdAt: string;
   originWarehouse: Pick<Warehouse, "id" | "name" | "code">;
   destinationWarehouse: Pick<Warehouse, "id" | "name" | "code">;
   item: Pick<CatalogItem, "id" | "name" | "unit">;
   createdBy: { id: string; name: string } | null;
+  driver: { id: string; name: string; email: string } | null;
+  receivedBy: { id: string; name: string } | null;
 };
 
 export type AiDocumentSummary = {
@@ -1475,6 +1491,17 @@ export async function updateOrganizationUserRequest(token: string, userId: strin
   });
 }
 
+export async function createOrganizationUserRequest(token: string, payload: { name: string; email: string; password: string; role: string }) {
+  if (isDemoMode) {
+    return demoApi.createOrganizationUser(payload);
+  }
+  return apiRequest<{ user: OrganizationWorkspaceResponse["users"][number] }>("/organizations/users", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function listWarehousesRequest(token: string) {
   if (isDemoMode) {
     return demoApi.listWarehouses();
@@ -1521,12 +1548,20 @@ export async function listInventoryTransfersRequest(token: string) {
   return apiRequest<{ transfers: InventoryTransfer[] }>("/warehouses/transfers", { headers: authHeaders(token) });
 }
 
-export async function createInventoryTransferRequest(token: string, payload: { originWarehouseId: string; destinationWarehouseId: string; itemId: string; quantity: number; notes?: string }) {
+export async function createInventoryTransferRequest(token: string, payload: { originWarehouseId: string; destinationWarehouseId: string; itemId: string; driverId: string; quantity: number; notes?: string }) {
   if (isDemoMode) return demoApi.createInventoryTransfer(payload);
   return apiRequest<{ transfer: InventoryTransfer }>("/warehouses/transfers", {
     method: "POST",
     headers: authHeaders(token),
     body: JSON.stringify(payload),
+  });
+}
+
+export async function receiveInventoryTransferRequest(token: string, transferId: string) {
+  if (isDemoMode) return demoApi.receiveInventoryTransfer(transferId);
+  return apiRequest<{ transfer: InventoryTransfer }>(`/warehouses/transfers/${transferId}/receive`, {
+    method: "POST",
+    headers: authHeaders(token),
   });
 }
 

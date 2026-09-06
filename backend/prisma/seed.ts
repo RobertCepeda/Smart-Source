@@ -117,7 +117,7 @@ async function main() {
       email: "prueba01@gmail.com",
       company: organization.name,
       passwordHash: await bcrypt.hash("12345678", 12),
-      role: "ADMIN",
+      role: "OWNER",
     },
   });
 

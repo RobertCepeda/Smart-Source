@@ -49,7 +49,7 @@ const quickActions = [
   {
     title: "Registrar suplidor",
     description: "Alta guiada en 4 pasos",
-    path: "/registration",
+    path: "/suppliers/new",
     icon: Plus,
   },
   {
@@ -118,7 +118,7 @@ export function Dashboard() {
               <TrendingUp className="h-3.5 w-3.5" />
               Reportes
             </Button>
-            <Button type="button" onClick={() => navigate("/registration")}>
+            <Button type="button" onClick={() => navigate("/suppliers/new")}>
               <Plus className="h-3.5 w-3.5" />
               Nuevo suplidor
             </Button>
@@ -146,9 +146,9 @@ export function Dashboard() {
           icon={Building2}
         />
         <MetricCard
-          label="Catálogo"
+          label="Insumos"
           value={(report?.overview.items ?? organization?.counts.items ?? 0).toString()}
-          detail="Items disponibles"
+          detail="Insumos disponibles"
           icon={PackageSearch}
         />
         <MetricCard
@@ -275,7 +275,7 @@ export function Dashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <h2 className="text-sm font-bold text-ink">Órdenes recientes</h2>
-            <Link to="/purchase-history" className="text-xs font-bold text-brand-700 hover:text-brand-800">
+            <Link to="/purchase-orders?view=history" className="text-xs font-bold text-brand-700 hover:text-brand-800">
               Ver historial
             </Link>
           </CardHeader>

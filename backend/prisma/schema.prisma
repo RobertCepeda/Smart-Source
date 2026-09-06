@@ -35,7 +35,10 @@ model User {
   auditLogs          AuditLog[]
   inventoryMovements InventoryMovement[]
   inventoryTransfers InventoryTransfer[]
+  drivenTransfers    InventoryTransfer[] @relation("TransferDriver")
+  receivedTransfers  InventoryTransfer[] @relation("TransferReceiver")
   receivedOrders     PurchaseOrder[]     @relation("OrderReceiver")
+  purchaseOrderEvents PurchaseOrderEvent[]
 
   @@index([email])
   @@index([organizationId])
@@ -66,6 +69,7 @@ model Organization {
   quoteRequests      QuoteRequest[]
   quoteRequestDrafts QuoteRequestDraft[]
   purchaseOrders     PurchaseOrder[]
+  purchaseOrderEvents PurchaseOrderEvent[]
   costCenters        CostCenter[]
   warehouses         Warehouse[]
   inventoryMovements InventoryMovement[]
@@ -356,6 +360,7 @@ model PurchaseOrder {
   tax                Decimal             @default(0) @db.Decimal(12, 2)
   total              Decimal             @default(0) @db.Decimal(12, 2)
   notes              String?
+  updatedAt          DateTime            @updatedAt
   supplier           Supplier            @relation(fields: [supplierId], references: [id])
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   quoteRequest       QuoteRequest?       @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
@@ -364,6 +369,7 @@ model PurchaseOrder {
   costCenterRef      CostCenter?          @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
   lines              PurchaseOrderLine[]
   inventoryMovements InventoryMovement[]
+  events             PurchaseOrderEvent[]
 
   @@index([organizationId])
   @@index([supplierId])
@@ -372,6 +378,24 @@ model PurchaseOrder {
   @@index([costCenterId])
   @@index([status])
   @@index([issueDate])
+}
+
+model PurchaseOrderEvent {
+  id             String      @id @default(cuid())
+  organizationId String
+  orderId        String
+  createdById    String?
+  status         OrderStatus
+  note           String?
+  createdAt      DateTime    @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdBy    User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([orderId])
+  @@index([createdAt])
 }
 
 enum OrderStatus {
@@ -693,23 +717,38 @@ model InventoryTransfer {
   destinationWarehouseId String
   itemId                 String
   createdById            String?
+  driverId               String?
+  receivedById           String?
+  status                 InventoryTransferStatus @default(PENDIENTE)
   quantity               Decimal  @db.Decimal(14, 2)
   unit                   String?
   notes                  String?
   createdAt              DateTime @default(now())
+  receivedAt             DateTime?
+  updatedAt              DateTime @updatedAt
 
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   originWarehouse      Warehouse    @relation("TransferOrigin", fields: [originWarehouseId], references: [id], onDelete: Restrict)
   destinationWarehouse Warehouse    @relation("TransferDestination", fields: [destinationWarehouseId], references: [id], onDelete: Restrict)
   item                 Item         @relation(fields: [itemId], references: [id], onDelete: Restrict)
   createdBy            User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  driver               User?        @relation("TransferDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  receivedBy           User?        @relation("TransferReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
   movements            InventoryMovement[]
 
   @@index([organizationId])
   @@index([originWarehouseId])
   @@index([destinationWarehouseId])
   @@index([itemId])
+  @@index([driverId])
+  @@index([receivedById])
+  @@index([status])
   @@index([createdAt])
+}
+
+enum InventoryTransferStatus {
+  PENDIENTE
+  RECIBIDA
 }
 
 model CostCenter {

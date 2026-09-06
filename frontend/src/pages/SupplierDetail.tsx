@@ -45,7 +45,7 @@ export function SupplierDetail() {
               Volver
             </Link>
             <Link
-              to={`/registration?edit=${supplier.id}`}
+              to={`/suppliers/${supplier.id}/edit`}
               className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink px-3.5 text-[13px] font-semibold text-white transition hover:bg-slate-800"
             >
               <Pencil className="h-4 w-4" />

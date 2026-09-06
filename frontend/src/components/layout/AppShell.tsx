@@ -9,7 +9,6 @@ import {
   ClipboardList,
   CircleDollarSign,
   Headphones,
-  History,
   LayoutDashboard,
   LineChart,
   LogOut,
@@ -20,7 +19,6 @@ import {
   Search,
   Settings,
   ShoppingCart,
-  UserPlus,
   Warehouse,
   X,
 } from "lucide-react";
@@ -46,9 +44,8 @@ const navigationGroups: NavigationGroup[] = [
     label: "Suplidores y catálogo",
     items: [
       { label: "Suplidores", path: "/suppliers", icon: Building2 },
-      { label: "Registro", path: "/registration", icon: UserPlus },
-      { label: "Catálogo", path: "/catalog", icon: PackageSearch },
-      { label: "Búsqueda", path: "/search", icon: Search },
+      { label: "Creación de catálogo", path: "/catalog", icon: PackageSearch },
+      { label: "Insumos", path: "/search", icon: Search },
     ],
   },
   {
@@ -65,7 +62,6 @@ const navigationGroups: NavigationGroup[] = [
       { label: "Solicitudes", path: "/quote-requests", icon: ClipboardList },
       { label: "Órdenes", path: "/purchase-orders", icon: ShoppingCart },
       { label: "Almacenes", path: "/warehouses", icon: Warehouse },
-      { label: "Historial", path: "/purchase-history", icon: History },
       { label: "Precios", path: "/price-history", icon: LineChart },
       { label: "Reportes", path: "/reports", icon: BarChart3 },
       { label: "Consultas IA", path: "/ai-consult", icon: BrainCircuit },
@@ -171,7 +167,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
       <Button type="button" variant="outline" size="icon" title="Centro de Atención" onClick={() => navigate("/support")}>
           <Bell className="h-4 w-4" />
         </Button>
-        <Button type="button" size="sm" onClick={() => navigate("/registration")}>
+        <Button type="button" size="sm" onClick={() => navigate("/suppliers/new")}>
           <Plus className="h-4 w-4" />
           <span className="hidden sm:inline">Nuevo</span>
         </Button>

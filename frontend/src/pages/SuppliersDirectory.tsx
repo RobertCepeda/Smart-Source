@@ -76,7 +76,7 @@ export function SuppliersDirectory() {
         description="Consulta, filtra y administra los suplidores de tu organización desde tarjetas claras y rápidas."
         actions={
           <Link
-            to="/registration"
+            to="/suppliers/new"
             className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink px-3.5 text-[13px] font-semibold text-white transition hover:bg-slate-800"
           >
             <Plus className="h-4 w-4" />
@@ -189,7 +189,7 @@ export function SuppliersDirectory() {
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1.5">
                             <Button type="button" variant="outline" size="icon" title="Copiar información" onClick={() => navigator.clipboard.writeText(summary)}><Copy className="h-3.5 w-3.5" /></Button>
-                            <Link to={`/registration?edit=${supplier.id}`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white" title="Editar"><Pencil className="h-3.5 w-3.5" /></Link>
+                            <Link to={`/suppliers/${supplier.id}/edit`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white" title="Editar"><Pencil className="h-3.5 w-3.5" /></Link>
                             <Button type="button" variant="outline" size="icon" title="Desactivar" onClick={() => onDelete(supplier)}><Trash2 className="h-3.5 w-3.5 text-red-600" /></Button>
                           </div>
                         </td>

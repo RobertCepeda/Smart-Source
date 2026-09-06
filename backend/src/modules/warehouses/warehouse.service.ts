@@ -73,6 +73,8 @@ const transferInclude = {
   destinationWarehouse: { select: { id: true, name: true, code: true } },
   item: { select: { id: true, name: true, unit: true } },
   createdBy: { select: { id: true, name: true } },
+  driver: { select: { id: true, name: true, email: true } },
+  receivedBy: { select: { id: true, name: true } },
 };
 
 function mapTransfer(transfer: any) {
@@ -100,13 +102,14 @@ export async function createInventoryTransfer(
     throw error;
   }
 
-  const [origin, destination, item] = await Promise.all([
+  const [origin, destination, item, driver] = await Promise.all([
     prisma.warehouse.findFirst({ where: { id: input.originWarehouseId, organizationId, isActive: true } }),
     prisma.warehouse.findFirst({ where: { id: input.destinationWarehouseId, organizationId, isActive: true } }),
     prisma.item.findFirst({ where: { id: input.itemId, organizationId, isActive: true, type: "MATERIAL" } }),
+    prisma.user.findFirst({ where: { id: input.driverId, organizationId, isActive: true } }),
   ]);
-  if (!origin || !destination || !item) {
-    const error = new Error("El almacén o artículo seleccionado no está disponible.");
+  if (!origin || !destination || !item || !driver) {
+    const error = new Error("El almacén, artículo o chofer seleccionado no está disponible.");
     (error as Error & { status: number }).status = 404;
     throw error;
   }
@@ -126,16 +129,6 @@ export async function createInventoryTransfer(
       where: { id: originBalance.id },
       data: { quantity: (available - input.quantity).toFixed(2) },
     });
-    const destinationBalance = await tx.inventoryBalance.upsert({
-      where: { warehouseId_itemId: { warehouseId: destination.id, itemId: item.id } },
-      update: {},
-      create: { warehouseId: destination.id, itemId: item.id, quantity: "0" },
-    });
-    await tx.inventoryBalance.update({
-      where: { id: destinationBalance.id },
-      data: { quantity: (Number(destinationBalance.quantity) + input.quantity).toFixed(2) },
-    });
-
     const created = await tx.inventoryTransfer.create({
       data: {
         organizationId,
@@ -143,6 +136,7 @@ export async function createInventoryTransfer(
         destinationWarehouseId: destination.id,
         itemId: item.id,
         createdById: actorId,
+        driverId: driver.id,
         quantity: input.quantity.toFixed(2),
         unit: item.unit,
         notes: upper(input.notes),
@@ -151,33 +145,19 @@ export async function createInventoryTransfer(
     });
 
     const reference = `${origin.code} → ${destination.code}`;
-    await tx.inventoryMovement.createMany({
-      data: [
-        {
-          organizationId,
-          warehouseId: origin.id,
-          itemId: item.id,
-          createdById: actorId,
-          transferId: created.id,
-          type: "TRANSFERENCIA_SALIDA",
-          quantity: input.quantity.toFixed(2),
-          unit: item.unit,
-          reference,
-          notes: upper(input.notes),
-        },
-        {
-          organizationId,
-          warehouseId: destination.id,
-          itemId: item.id,
-          createdById: actorId,
-          transferId: created.id,
-          type: "TRANSFERENCIA_ENTRADA",
-          quantity: input.quantity.toFixed(2),
-          unit: item.unit,
-          reference,
-          notes: upper(input.notes),
-        },
-      ],
+    await tx.inventoryMovement.create({
+      data: {
+        organizationId,
+        warehouseId: origin.id,
+        itemId: item.id,
+        createdById: actorId,
+        transferId: created.id,
+        type: "TRANSFERENCIA_SALIDA",
+        quantity: input.quantity.toFixed(2),
+        unit: item.unit,
+        reference,
+        notes: `EN TRÁNSITO CON ${driver.name}${input.notes ? ` · ${upper(input.notes)}` : ""}`,
+      },
     });
     await recordAudit(
       {
@@ -186,13 +166,77 @@ export async function createInventoryTransfer(
         action: "UPDATE",
         entityType: "INVENTORY_TRANSFER",
         entityId: created.id,
-        summary: `Transfirió ${input.quantity} ${item.unit ?? "unidad"} de ${item.name}: ${origin.name} a ${destination.name}`,
+        summary: `Despachó ${input.quantity} ${item.unit ?? "unidad"} de ${item.name}: ${origin.name} a ${destination.name} con ${driver.name}`,
         before: { warehouseId: origin.id, quantity: available },
-        after: { warehouseId: destination.id, quantity: Number(destinationBalance.quantity) + input.quantity },
+        after: { destinationWarehouseId: destination.id, status: "PENDIENTE", driverId: driver.id },
       },
       tx,
     );
     return created;
+  });
+
+  return mapTransfer(transfer);
+}
+
+export async function receiveInventoryTransfer(organizationId: string, actorId: string, transferId: string) {
+  const previous = await prisma.inventoryTransfer.findFirst({
+    where: { id: transferId, organizationId },
+    include: transferInclude,
+  });
+  if (!previous) {
+    const error = new Error("Transferencia no encontrada.");
+    (error as Error & { status: number }).status = 404;
+    throw error;
+  }
+  if (previous.status === "RECIBIDA") {
+    const error = new Error("Esta transferencia ya fue recibida en el almacén destino.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
+
+  const transfer = await prisma.$transaction(async (tx) => {
+    await tx.inventoryBalance.upsert({
+      where: { warehouseId_itemId: { warehouseId: previous.destinationWarehouseId, itemId: previous.itemId } },
+      update: { quantity: { increment: previous.quantity } },
+      create: {
+        warehouseId: previous.destinationWarehouseId,
+        itemId: previous.itemId,
+        quantity: previous.quantity,
+      },
+    });
+    await tx.inventoryMovement.create({
+      data: {
+        organizationId,
+        warehouseId: previous.destinationWarehouseId,
+        itemId: previous.itemId,
+        createdById: actorId,
+        transferId: previous.id,
+        type: "TRANSFERENCIA_ENTRADA",
+        quantity: previous.quantity,
+        unit: previous.unit,
+        reference: `${previous.originWarehouse.code} → ${previous.destinationWarehouse.code}`,
+        notes: "RECEPCIÓN CONFIRMADA EN ALMACÉN DESTINO",
+      },
+    });
+    const received = await tx.inventoryTransfer.update({
+      where: { id: previous.id },
+      data: { status: "RECIBIDA", receivedById: actorId, receivedAt: new Date() },
+      include: transferInclude,
+    });
+    await recordAudit(
+      {
+        organizationId,
+        userId: actorId,
+        action: "RECEIVE",
+        entityType: "INVENTORY_TRANSFER",
+        entityId: previous.id,
+        summary: `Confirmó la recepción de ${previous.item.name} en ${previous.destinationWarehouse.name}`,
+        before: { status: previous.status },
+        after: { status: "RECIBIDA", receivedById: actorId },
+      },
+      tx,
+    );
+    return received;
   });
 
   return mapTransfer(transfer);

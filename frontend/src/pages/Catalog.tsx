@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Eye, PackagePlus, RotateCcw, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, PackagePlus } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
@@ -13,13 +13,10 @@ import {
   createCatalogItemRequest,
   createCategoryRequest,
   createSubcategoryRequest,
-  deleteCatalogItemRequest,
   getQuoteRequestDraftRequest,
   listBrandsRequest,
-  listCatalogItemsRequest,
   listCategoriesRequest,
   listSubcategoriesRequest,
-  type CatalogFilters,
   type CatalogItemPayload,
 } from "../services/api";
 
@@ -37,7 +34,6 @@ export function Catalog() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
-  const [filters, setFilters] = useState<CatalogFilters>({});
   const [itemForm, setItemForm] = useState<CatalogItemPayload>(emptyItem);
   const [newCategory, setNewCategory] = useState("");
   const [subcategoryCategoryId, setSubcategoryCategoryId] = useState("");
@@ -52,19 +48,13 @@ export function Catalog() {
       if (suggestedItemName) {
         setItemForm((current) => (current.name.trim() ? current : { ...current, name: suggestedItemName }));
       }
-      setNotice("Tu solicitud quedó guardada como borrador. Agrega el ítem y vuelve cuando termines.");
+      setNotice("Tu solicitud quedó guardada como borrador. Agrega el insumo y vuelve cuando termines.");
     }
   }, [fromQuoteRequest, suggestedItemName]);
 
   const draftQuery = useQuery({
     queryKey: ["quote-request-draft"],
     queryFn: () => getQuoteRequestDraftRequest(token!),
-    enabled: Boolean(token),
-  });
-
-  const itemsQuery = useQuery({
-    queryKey: ["catalog-items", filters],
-    queryFn: () => listCatalogItemsRequest(token!, filters),
     enabled: Boolean(token),
   });
 
@@ -86,29 +76,19 @@ export function Catalog() {
     enabled: Boolean(token),
   });
 
-  const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
   const categories = categoriesQuery.data?.categories ?? [];
   const brands = brandsQuery.data?.brands ?? [];
   const subcategories = subcategoriesQuery.data?.subcategories ?? [];
   const itemSubcategories = subcategories.filter((entry) => entry.categoryId === itemForm.categoryId);
 
-  const stats = useMemo(() => {
-    return {
-      total: items.length,
-      materials: items.filter((item) => item.type === "MATERIAL").length,
-      services: items.filter((item) => item.type === "SERVICIO").length,
-      linked: items.reduce((count, item) => count + item.supplierCount, 0),
-    };
-  }, [items]);
-
   const createItemMutation = useMutation({
     mutationFn: () => createCatalogItemRequest(token!, itemForm),
     onSuccess: async () => {
       setItemForm(emptyItem);
-      setNotice(fromQuoteRequest ? "Ítem agregado al catálogo. Ya puedes volver al borrador de la solicitud." : "Ítem agregado al catálogo.");
+      setNotice(fromQuoteRequest ? "Insumo agregado. Ya puedes volver al borrador de la solicitud." : "Insumo agregado al catálogo.");
       await queryClient.invalidateQueries({ queryKey: ["catalog-items"] });
     },
-    onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos guardar el ítem."),
+    onError: (error) => setNotice(error instanceof Error ? error.message : "No pudimos guardar el insumo."),
   });
 
   const createCategoryMutation = useMutation({
@@ -135,15 +115,6 @@ export function Catalog() {
     },
   });
 
-  const deleteItemMutation = useMutation({
-    mutationFn: (id: string) => deleteCatalogItemRequest(token!, id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog-items"] }),
-  });
-
-  function updateFilter(key: keyof CatalogFilters, value: string) {
-    setFilters((current) => ({ ...current, [key]: value || undefined }));
-  }
-
   function updateItemField<K extends keyof CatalogItemPayload>(key: K, value: CatalogItemPayload[K]) {
     setNotice(null);
     setItemForm((current) => ({ ...current, [key]: value }));
@@ -153,8 +124,8 @@ export function Catalog() {
     <div className="space-y-5">
       <PageHeader
         eyebrow="Módulo 2"
-        title="Catálogo"
-        description="Administra materiales y servicios con categorías y subcategorías estandarizadas."
+        title="Creación de catálogo"
+        description="Registra insumos y servicios con categorías, subcategorías y marcas estandarizadas."
         actions={
           fromQuoteRequest || Boolean(draftQuery.data?.draft) ? (
             <Link
@@ -181,17 +152,10 @@ export function Catalog() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card><CardContent className="p-4"><p className="text-[13px] font-semibold text-slate-500">Ítems</p><p className="mt-1.5 text-2xl font-bold">{stats.total}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-[13px] font-semibold text-slate-500">Materiales</p><p className="mt-1.5 text-2xl font-bold">{stats.materials}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-[13px] font-semibold text-slate-500">Servicios</p><p className="mt-1.5 text-2xl font-bold">{stats.services}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-[13px] font-semibold text-slate-500">Relaciones</p><p className="mt-1.5 text-2xl font-bold">{stats.linked}</p></CardContent></Card>
-      </section>
-
       <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <Card>
           <CardHeader>
-              <h2 className="text-base font-bold text-ink">Agregar ítem</h2>
+              <h2 className="text-base font-bold text-ink">Agregar insumo</h2>
           </CardHeader>
           <CardContent>
             <form
@@ -202,14 +166,14 @@ export function Catalog() {
               }}
             >
               <label className="block">
-                <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Nombre</span>
+                <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Nombre del insumo</span>
                 <Input value={itemForm.name} onChange={(event) => updateItemField("name", event.target.value)} required />
               </label>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Tipo</span>
                   <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px]" value={itemForm.type} onChange={(event) => updateItemField("type", event.target.value as "MATERIAL" | "SERVICIO")}>
-                    <option value="MATERIAL">Material</option>
+                    <option value="MATERIAL">Insumo</option>
                     <option value="SERVICIO">Servicio</option>
                   </select>
                 </label>
@@ -248,7 +212,7 @@ export function Catalog() {
               {notice ? <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-[13px] text-brand-700">{notice}</div> : null}
               <Button type="submit" disabled={createItemMutation.isPending}>
                 <PackagePlus className="h-4 w-4" />
-                {createItemMutation.isPending ? "Guardando..." : "Agregar ítem"}
+                {createItemMutation.isPending ? "Guardando..." : "Agregar insumo"}
               </Button>
             </form>
           </CardContent>
@@ -308,65 +272,8 @@ export function Catalog() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="grid gap-3 p-4 lg:grid-cols-[1fr_140px_180px_180px_auto]">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input className="pl-9" placeholder="Buscar ítem, categoría o marca" value={filters.search ?? ""} onChange={(event) => updateFilter("search", event.target.value)} />
-              </div>
-              <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={filters.type ?? ""} onChange={(event) => updateFilter("type", event.target.value)}>
-                <option value="">Todos</option>
-                <option value="MATERIAL">Material</option>
-                <option value="SERVICIO">Servicio</option>
-              </select>
-              <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={filters.categoryId ?? ""} onChange={(event) => setFilters((current) => ({ ...current, categoryId: event.target.value || undefined, subcategoryId: undefined }))}>
-                <option value="">Todas las categorías</option>
-                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-              </select>
-              <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={filters.subcategoryId ?? ""} onChange={(event) => updateFilter("subcategoryId", event.target.value)} disabled={!filters.categoryId}>
-                <option value="">Todas las subcategorías</option>
-                {subcategories.filter((subcategory) => subcategory.categoryId === filters.categoryId).map((subcategory) => <option key={subcategory.id} value={subcategory.id}>{subcategory.name}</option>)}
-              </select>
-              <Button type="button" variant="outline" onClick={() => setFilters({})}>
-                <RotateCcw className="h-4 w-4" />
-                Limpiar
-              </Button>
-            </CardContent>
-          </Card>
         </div>
       </section>
-
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-bold text-ink">Ítems del catálogo</h2>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-border">
-            {items.map((item) => (
-              <div key={item.id} className="grid gap-3 px-5 py-4 md:grid-cols-[1fr_140px_180px_90px_auto] md:items-center">
-                <div>
-                  <p className="font-bold text-ink">{item.name}</p>
-                  <p className="mt-1 text-sm text-slate-600">{item.description || item.unit || "Sin descripción"}</p>
-                </div>
-                <Badge tone={item.type === "MATERIAL" ? "green" : "blue"}>{item.type === "MATERIAL" ? "Material" : "Servicio"}</Badge>
-                <p className="text-sm text-slate-600">{item.category?.name || "Sin categoría"}{item.subcategory ? ` / ${item.subcategory.name}` : ""} · {item.brand?.name || "Sin marca"}</p>
-                <p className="text-sm font-semibold text-slate-600">{item.supplierCount} supl.</p>
-                <div className="flex items-center gap-2">
-                  <Link to={`/catalog/${item.id}`}>
-                    <Button type="button" variant="outline" size="icon" title="Ver registro">
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  </Link>
-                  <Button type="button" variant="outline" size="icon" title="Desactivar" onClick={() => deleteItemMutation.mutate(item.id)}>
-                    <Trash2 className="h-4 w-4 text-red-600" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!items.length ? <div className="p-8 text-center text-sm text-slate-600">No hay ítems con esos filtros.</div> : null}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

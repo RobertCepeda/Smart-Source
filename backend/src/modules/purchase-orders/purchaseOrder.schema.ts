@@ -20,6 +20,7 @@ export const createPurchaseOrderSchema = z.object({
   notes: z.string().trim().max(800).optional(),
   costCenterId: z.string().trim().optional(),
   costCenter: z.string().trim().max(80).optional(),
+  warehouseId: z.string().trim().optional(),
   quoteRequestId: z.string().optional(),
   lines: z
     .array(

@@ -72,8 +72,12 @@ export const demoUser: AuthUser = {
   company: organization.name,
   avatarUrl: null,
   authProvider: "EMAIL",
-  role: "ADMIN",
+  role: "OWNER",
 };
+
+let organizationUsers: OrganizationWorkspaceResponse["users"] = [
+  { id: demoUser.id, name: demoUser.name, email: demoUser.email, role: demoUser.role, isActive: true, lastLoginAt: now, createdAt: now },
+];
 
 const categories: CatalogEntity[] = [
   { id: "cat_construction", name: "Construcción" },
@@ -670,12 +674,17 @@ export const demoApi = {
     order.costCenterId = center?.id ?? null;
     order.costCenter = center ? `${center.code} - ${center.name}` : payload.costCenter ?? null;
     order.costCenterRecord = center;
+    const warehouse = warehouses.find((entry) => entry.id === payload.warehouseId) ?? null;
+    order.warehouseId = warehouse?.id ?? null;
+    order.warehouse = warehouse;
     purchaseOrders = [order, ...purchaseOrders];
     return ok({ order });
   },
   updatePurchaseOrderStatus: (id: string, status: PurchaseOrder["status"], warehouseId?: string) => {
     const order = purchaseOrders.find((entry) => entry.id === id) ?? purchaseOrders[0];
     order.status = status;
+    order.updatedAt = new Date().toISOString();
+    order.events.push({ id: `po_event_${Date.now()}`, status, note: null, createdAt: order.updatedAt, createdBy: { id: demoUser.id, name: demoUser.name, email: demoUser.email } });
     if (status === "RECIBIDA" && warehouseId) {
       const warehouse = warehouses.find((entry) => entry.id === warehouseId) ?? warehouses[0];
       order.warehouseId = warehouse.id;
@@ -887,7 +896,7 @@ export const demoApi = {
       organization: {
         ...organization,
         counts: {
-          users: 1,
+          users: organizationUsers.filter((user) => user.isActive).length,
           suppliers: suppliers.filter((supplier) => supplier.isActive).length,
           items: catalogItems.length,
           supportTickets: supportTickets.length,
@@ -896,12 +905,18 @@ export const demoApi = {
           warehouses: warehouses.length,
         },
       },
-      users: [{ id: demoUser.id, name: demoUser.name, email: demoUser.email, role: demoUser.role, isActive: true, lastLoginAt: now, createdAt: now }],
+      users: organizationUsers,
     }),
   listAuditLogs: (limit: number) => ok({ logs: auditLogs.slice(0, limit) }),
-  updateOrganizationUser: (_userId: string, payload: { role: string; isActive?: boolean }) => {
-    demoUser.role = payload.role;
-    return ok({ user: { id: demoUser.id, name: demoUser.name, email: demoUser.email, role: demoUser.role, isActive: payload.isActive ?? true, lastLoginAt: now, createdAt: now } });
+  updateOrganizationUser: (userId: string, payload: { role: string; isActive?: boolean }) => {
+    const user = organizationUsers.find((entry) => entry.id === userId)!;
+    Object.assign(user, { role: payload.role, isActive: payload.isActive ?? user.isActive });
+    return ok({ user });
+  },
+  createOrganizationUser: (payload: { name: string; email: string; password: string; role: string }) => {
+    const user: OrganizationWorkspaceResponse["users"][number] = { id: `user_${Date.now()}`, name: payload.name, email: payload.email.toLowerCase(), role: payload.role, isActive: true, lastLoginAt: null, createdAt: new Date().toISOString() };
+    organizationUsers = [...organizationUsers, user];
+    return ok({ user });
   },
   listWarehouses: () => ok({ warehouses }),
   createWarehouse: (payload: { name: string; code: string; type: "GENERAL" | "PROJECT"; location?: string }) => {
@@ -962,17 +977,32 @@ export const demoApi = {
     return ok({ costCenter });
   },
   listInventoryTransfers: () => ok({ transfers: inventoryTransfers }),
-  createInventoryTransfer: (payload: { originWarehouseId: string; destinationWarehouseId: string; itemId: string; quantity: number; notes?: string }) => {
+  createInventoryTransfer: (payload: { originWarehouseId: string; destinationWarehouseId: string; itemId: string; driverId: string; quantity: number; notes?: string }) => {
     const origin = warehouses.find((entry) => entry.id === payload.originWarehouseId) ?? warehouses[0];
     const destination = warehouses.find((entry) => entry.id === payload.destinationWarehouseId) ?? warehouses[1];
     const originBalance = origin.balances.find((entry) => entry.itemId === payload.itemId) ?? origin.balances[0];
     const item = originBalance.item;
     originBalance.quantity = (Number(originBalance.quantity) - payload.quantity).toFixed(2);
-    let destinationBalance = destination.balances.find((entry) => entry.itemId === item.id);
-    if (!destinationBalance) { destinationBalance = { id: `balance_${Date.now()}`, itemId: item.id, quantity: "0.00", item }; destination.balances.push(destinationBalance); }
-    destinationBalance.quantity = (Number(destinationBalance.quantity) + payload.quantity).toFixed(2);
-    const transfer: InventoryTransfer = { id: `transfer_${Date.now()}`, originWarehouseId: origin.id, destinationWarehouseId: destination.id, itemId: item.id, quantity: payload.quantity.toFixed(2), unit: item.unit, notes: payload.notes ?? null, createdAt: new Date().toISOString(), originWarehouse: { id: origin.id, name: origin.name, code: origin.code }, destinationWarehouse: { id: destination.id, name: destination.name, code: destination.code }, item: { id: item.id, name: item.name, unit: item.unit }, createdBy: { id: demoUser.id, name: demoUser.name } };
+    const createdAt = new Date().toISOString();
+    const driver = organizationUsers.find((entry) => entry.id === payload.driverId) ?? organizationUsers[0];
+    const transfer: InventoryTransfer = { id: `transfer_${Date.now()}`, originWarehouseId: origin.id, destinationWarehouseId: destination.id, itemId: item.id, driverId: driver.id, receivedById: null, status: "PENDIENTE", quantity: payload.quantity.toFixed(2), unit: item.unit, notes: payload.notes ?? null, createdAt, updatedAt: createdAt, receivedAt: null, originWarehouse: { id: origin.id, name: origin.name, code: origin.code }, destinationWarehouse: { id: destination.id, name: destination.name, code: destination.code }, item: { id: item.id, name: item.name, unit: item.unit }, createdBy: { id: demoUser.id, name: demoUser.name }, driver: { id: driver.id, name: driver.name, email: driver.email }, receivedBy: null };
     inventoryTransfers = [transfer, ...inventoryTransfers];
+    return ok({ transfer });
+  },
+  receiveInventoryTransfer: (transferId: string) => {
+    const transfer = inventoryTransfers.find((entry) => entry.id === transferId)!;
+    if (transfer.status === "PENDIENTE") {
+      const destination = warehouses.find((entry) => entry.id === transfer.destinationWarehouseId)!;
+      const item = catalogItems.find((entry) => entry.id === transfer.itemId)!;
+      let balance = destination.balances.find((entry) => entry.itemId === transfer.itemId);
+      if (!balance) { balance = { id: `balance_${Date.now()}`, itemId: item.id, quantity: "0.00", item }; destination.balances.push(balance); }
+      balance.quantity = (Number(balance.quantity) + Number(transfer.quantity)).toFixed(2);
+      transfer.status = "RECIBIDA";
+      transfer.receivedById = demoUser.id;
+      transfer.receivedBy = { id: demoUser.id, name: demoUser.name };
+      transfer.receivedAt = new Date().toISOString();
+      transfer.updatedAt = transfer.receivedAt;
+    }
     return ok({ transfer });
   },
   getAdminOverview: () =>
@@ -1050,6 +1080,7 @@ function makeOrder(
     quoteRequestId: null,
     warehouseId: null,
     receivedAt: null,
+    updatedAt: now,
     costCenterId: null,
     costCenter: null,
     costCenterRecord: null,
@@ -1064,6 +1095,7 @@ function makeOrder(
     warehouse: null,
     quoteRequest: null,
     receivedBy: null,
+    events: [{ id: `${id}_event`, status, note: null, createdAt: now, createdBy: { id: demoUser.id, name: demoUser.name, email: demoUser.email } }],
     lines: lines.map((line, index) => {
       const item = catalogItems.find((entry) => entry.id === line.itemId) ?? catalogItems[0];
       return {

@@ -36,6 +36,7 @@ import {
   generateQuoteRequestEmailRequest,
   getQuoteRequestRequest,
   getQuoteRequestDraftRequest,
+  getOrganizationWorkspaceRequest,
   listCatalogItemsRequest,
   listCostCentersRequest,
   listQuoteRequestsRequest,
@@ -154,6 +155,11 @@ export function QuoteRequests() {
   const costCentersQuery = useQuery({
     queryKey: ["cost-centers", "quote-request"],
     queryFn: () => listCostCentersRequest(token!),
+    enabled: Boolean(token),
+  });
+  const organizationQuery = useQuery({
+    queryKey: ["organization-workspace", "quote-request"],
+    queryFn: () => getOrganizationWorkspaceRequest(token!),
     enabled: Boolean(token),
   });
 
@@ -509,6 +515,7 @@ export function QuoteRequests() {
           catalogItems={catalogItems}
           units={units}
           costCenters={(costCentersQuery.data?.costCenters ?? []).filter((entry) => entry.isActive)}
+          requesters={(organizationQuery.data?.users ?? []).filter((entry) => entry.isActive)}
           project={project}
           costCenterId={costCenterId}
           requesterName={requesterName}
@@ -580,6 +587,7 @@ function CreateQuoteRequestPanel({
   catalogItems,
   units,
   costCenters,
+  requesters,
   project,
   costCenterId,
   requesterName,
@@ -614,6 +622,7 @@ function CreateQuoteRequestPanel({
   catalogItems: CatalogItem[];
   units: UnitOfMeasure[];
   costCenters: CostCenter[];
+  requesters: Array<{ id: string; name: string; email: string }>;
   project: string;
   costCenterId: string;
   requesterName: string;
@@ -643,6 +652,8 @@ function CreateQuoteRequestPanel({
   onDiscardDraft: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
+  const [isDragging, setIsDragging] = useState(false);
+
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
       {restoredDraftAt ? (
@@ -677,7 +688,10 @@ function CreateQuoteRequestPanel({
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Solicitante</span>
-              <Input value={requesterName} onChange={(event) => onRequesterNameChange(event.target.value)} placeholder="Nombre del solicitante" />
+              <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink" value={requesterName} onChange={(event) => onRequesterNameChange(event.target.value)} required>
+                <option value="">Selecciona un solicitante</option>
+                {requesters.map((requester) => <option key={requester.id} value={requester.name}>{requester.name} · {requester.email}</option>)}
+              </select>
             </label>
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Fecha límite</span>
@@ -776,12 +790,18 @@ function CreateQuoteRequestPanel({
           <h2 className="text-base font-bold text-ink">Adjuntos de referencia</h2>
         </CardHeader>
         <CardContent>
-          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
+          <div
+            className={`rounded-lg border border-dashed p-3 transition ${isDragging ? "border-brand-500 bg-brand-50" : "border-slate-300 bg-slate-50"}`}
+            onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false); }}
+            onDrop={(event) => { event.preventDefault(); setIsDragging(false); onAddAttachments(event.dataTransfer.files); }}
+          >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-slate-500">Planos, fichas técnicas o documentos para enviar a los suplidores.</p>
+              <p className="text-xs text-slate-500">Arrastra aquí planos, fichas técnicas o documentos, o selecciónalos manualmente.</p>
               <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-xs font-bold text-ink shadow-sm transition hover:bg-slate-100">
                 <Paperclip className="h-4 w-4" />
-                Adjuntar
+                Seleccionar archivos
                 <input
                   type="file"
                   multiple

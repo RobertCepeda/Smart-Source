@@ -29,7 +29,7 @@ const statusTone: Record<PurchaseOrderStatus, "slate" | "green" | "amber" | "blu
   CANCELADA: "amber",
 };
 
-export function PurchaseHistory() {
+export function PurchaseHistory({ embedded = false }: { embedded?: boolean }) {
   const { token } = useAuth();
   const [search, setSearch] = useState("");
   const [supplierId, setSupplierId] = useState("");
@@ -59,6 +59,7 @@ export function PurchaseHistory() {
     queryKey: ["purchase-history", filters],
     queryFn: () => listPurchaseOrdersRequest(token!, filters),
     enabled: Boolean(token),
+    refetchInterval: 5000,
   });
 
   const suppliers = useMemo(() => suppliersQuery.data?.suppliers ?? [], [suppliersQuery.data?.suppliers]);
@@ -100,11 +101,11 @@ export function PurchaseHistory() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
+      {!embedded ? <PageHeader
         eyebrow="Módulo 5"
         title="Historial"
         description="Consulta órdenes por suplidor, estado, fecha, monto y detalle de cada compra."
-      />
+      /> : null}
 
       <Card>
         <CardContent className="grid gap-3 p-4 xl:grid-cols-[1.3fr_1fr_160px_150px_150px_auto]">

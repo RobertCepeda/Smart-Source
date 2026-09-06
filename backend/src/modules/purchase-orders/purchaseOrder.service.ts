@@ -43,6 +43,10 @@ const orderInclude = {
   costCenterRef: { select: { id: true, code: true, name: true, isActive: true } },
   quoteRequest: { select: { id: true, number: true, project: true, costCenter: true, costCenterId: true } },
   receivedBy: { select: { id: true, name: true } },
+  events: {
+    include: { createdBy: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: "asc" as const },
+  },
 };
 
 function cleanString(value?: string | null) {
@@ -77,10 +81,12 @@ function mapOrder(order: any) {
     tax: order.tax.toString(),
     total: order.total.toString(),
     notes: order.notes,
+    updatedAt: order.updatedAt,
     supplier: order.supplier,
     warehouse: order.warehouse,
     quoteRequest: order.quoteRequest,
     receivedBy: order.receivedBy,
+    events: order.events,
     lines: order.lines.map((line: any) => ({
       id: line.id,
       itemId: line.itemId,
@@ -221,6 +227,19 @@ export async function createPurchaseOrder(organizationId: string, actorId: strin
     (error as Error & { status: number }).status = 400;
     throw error;
   }
+  const selectedItems = await prisma.item.findMany({
+    where: { id: { in: input.lines.map((line) => line.itemId) }, organizationId },
+    select: { id: true, type: true },
+  });
+  const requiresWarehouse = selectedItems.some((item) => item.type === "MATERIAL");
+  const warehouse = input.warehouseId
+    ? await prisma.warehouse.findFirst({ where: { id: input.warehouseId, organizationId, isActive: true } })
+    : null;
+  if (requiresWarehouse && !warehouse) {
+    const error = new Error("Selecciona el almacén de destino para esta orden.");
+    (error as Error & { status: number }).status = 400;
+    throw error;
+  }
 
   const lines = input.lines.map((line) => {
     const lineTotal = money(line.quantity * line.unitPrice);
@@ -247,6 +266,7 @@ export async function createPurchaseOrder(organizationId: string, actorId: strin
         number,
         supplierId: input.supplierId,
         quoteRequestId: input.quoteRequestId,
+        warehouseId: warehouse?.id,
         costCenterId: costCenter?.id,
         costCenter: costCenter ? `${costCenter.code} - ${costCenter.name}` : cleanString(input.costCenter) ?? quoteRequest?.costCenter ?? undefined,
         issueDate: input.issueDate ? new Date(input.issueDate) : undefined,
@@ -257,6 +277,14 @@ export async function createPurchaseOrder(organizationId: string, actorId: strin
         notes: cleanString(input.notes),
         lines: {
           create: lines.map(({ numericLineTotal: _numericLineTotal, ...line }) => line),
+        },
+        events: {
+          create: {
+            organizationId,
+            createdById: actorId,
+            status: "BORRADOR",
+            note: warehouse ? `ORDEN CREADA PARA ${warehouse.name}` : "ORDEN CREADA",
+          },
         },
       },
       include: orderInclude,
@@ -299,13 +327,14 @@ export async function updatePurchaseOrderStatus(
       throw error;
     }
     const inventoryLines = previous.lines.filter((line) => line.item.type === "MATERIAL");
-    if (inventoryLines.length > 0 && !input.warehouseId) {
+    const destinationWarehouseId = input.warehouseId ?? previous.warehouseId ?? undefined;
+    if (inventoryLines.length > 0 && !destinationWarehouseId) {
       const error = new Error("Selecciona el almacén que recibirá los productos.");
       (error as Error & { status: number }).status = 400;
       throw error;
     }
-    const warehouse = input.warehouseId
-      ? await prisma.warehouse.findFirst({ where: { id: input.warehouseId, organizationId, isActive: true } })
+    const warehouse = destinationWarehouseId
+      ? await prisma.warehouse.findFirst({ where: { id: destinationWarehouseId, organizationId, isActive: true } })
       : null;
     if (inventoryLines.length > 0 && !warehouse) {
       const error = new Error("El almacén seleccionado no es válido.");
@@ -335,10 +364,18 @@ export async function updatePurchaseOrderStatus(
           },
         });
       }
-      const updated = await tx.purchaseOrder.update({
+      await tx.purchaseOrder.update({
         where: { id },
         data: { status: "RECIBIDA", warehouseId: warehouse?.id, receivedById: actorId, receivedAt: new Date() },
-        include: orderInclude,
+      });
+      await tx.purchaseOrderEvent.create({
+        data: {
+          organizationId,
+          orderId: id,
+          createdById: actorId,
+          status: "RECIBIDA",
+          note: warehouse ? `RECIBIDA EN ${warehouse.name}` : "SERVICIO COMPLETADO",
+        },
       });
       await recordAudit(
         {
@@ -355,7 +392,7 @@ export async function updatePurchaseOrderStatus(
         },
         tx,
       );
-      return updated;
+      return tx.purchaseOrder.findUniqueOrThrow({ where: { id }, include: orderInclude });
     });
     return mapOrder(received);
   }
@@ -366,7 +403,19 @@ export async function updatePurchaseOrderStatus(
     throw error;
   }
 
-  const order = await prisma.purchaseOrder.update({ where: { id }, data: { status: input.status }, include: orderInclude });
+  const order = await prisma.$transaction(async (tx) => {
+    await tx.purchaseOrder.update({ where: { id }, data: { status: input.status } });
+    await tx.purchaseOrderEvent.create({
+      data: {
+        organizationId,
+        orderId: id,
+        createdById: actorId,
+        status: input.status,
+        note: input.status === "ENVIADA" ? "ORDEN ENVIADA Y EN SEGUIMIENTO" : "ORDEN CANCELADA",
+      },
+    });
+    return tx.purchaseOrder.findUniqueOrThrow({ where: { id }, include: orderInclude });
+  });
   await recordAudit({ organizationId, userId: actorId, action: "STATUS_CHANGE", entityType: "PURCHASE_ORDER", entityId: id, summary: `Cambió ${order.number} a ${input.status}`, before: { status: previous.status }, after: { status: input.status } });
   return mapOrder(order);
 }

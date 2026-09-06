@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Crown, History, Inbox, PackageSearch, ReceiptText, RotateCcw, Users, Warehouse as WarehouseIcon } from "lucide-react";
+import { Building2, Crown, History, Inbox, PackageSearch, Plus, ReceiptText, RotateCcw, Save, Users, Warehouse as WarehouseIcon, X } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
+import { Input } from "../components/ui/input";
 import { useAuth } from "../contexts/AuthContext";
-import { getOrganizationWorkspaceRequest, listAuditLogsRequest, restoreCatalogItemRequest, restoreSupplierRequest, updateOrganizationUserRequest } from "../services/api";
+import { createOrganizationUserRequest, getOrganizationWorkspaceRequest, listAuditLogsRequest, restoreCatalogItemRequest, restoreSupplierRequest, updateOrganizationUserRequest } from "../services/api";
 
 const roleOptions = [
   { value: "ADMIN", label: "Administrador" },
@@ -18,6 +21,9 @@ const roleOptions = [
 export function Organizations() {
   const { token, user: currentUser } = useAuth();
   const queryClient = useQueryClient();
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "VIEWER" });
+  const [notice, setNotice] = useState<string | null>(null);
   const canManage = currentUser?.role === "OWNER" || currentUser?.role === "ADMIN" || currentUser?.role === "SYSTEM_ADMIN";
   const organizationQuery = useQuery({
     queryKey: ["organization-workspace"],
@@ -39,6 +45,18 @@ export function Organizations() {
     },
   });
 
+  const createUserMutation = useMutation({
+    mutationFn: () => createOrganizationUserRequest(token!, userForm),
+    onSuccess: async () => {
+      setUserForm({ name: "", email: "", password: "", role: "VIEWER" });
+      setShowUserForm(false);
+      setNotice("Acceso creado para el empleado.");
+      await queryClient.invalidateQueries({ queryKey: ["organization-workspace"] });
+      await queryClient.invalidateQueries({ queryKey: ["organization-audit"] });
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : "No se pudo crear el acceso."),
+  });
+
   const restoreMutation = useMutation({
     mutationFn: ({ entityType, entityId }: { entityType: string; entityId: string }) => entityType === "SUPPLIER" ? restoreSupplierRequest(token!, entityId) : restoreCatalogItemRequest(token!, entityId),
     onSuccess: async () => {
@@ -58,6 +76,26 @@ export function Organizations() {
         title="Organizaciones"
         description="Administra la organización activa, plan, usuarios y separación de datos de la empresa."
       />
+
+      {notice ? <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-[13px] text-brand-800">{notice}</div> : null}
+
+      {canManage && showUserForm ? (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div><h2 className="text-sm font-bold text-ink">Nuevo acceso para empleado</h2><p className="mt-1 text-xs text-slate-500">Crea su cuenta y define el nivel de acceso inicial.</p></div>
+            <Button type="button" variant="ghost" size="icon" title="Cerrar" onClick={() => setShowUserForm(false)}><X className="h-4 w-4" /></Button>
+          </CardHeader>
+          <CardContent>
+            <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_180px_180px_auto]" onSubmit={(event) => { event.preventDefault(); createUserMutation.mutate(); }}>
+              <Input placeholder="Nombre completo" value={userForm.name} onChange={(event) => setUserForm((current) => ({ ...current, name: event.target.value }))} required />
+              <Input type="email" placeholder="Correo" value={userForm.email} onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))} required />
+              <Input type="password" minLength={8} placeholder="Clave temporal" value={userForm.password} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} required />
+              <select className="h-9 rounded-lg border border-border bg-white px-3 text-[13px]" value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>{roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+              <Button type="submit" disabled={createUserMutation.isPending}><Save className="h-4 w-4" />Crear</Button>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {organization ? (
         <>
@@ -94,21 +132,22 @@ export function Organizations() {
 
           <section className="grid gap-4 xl:grid-cols-[1fr_0.8fr]">
             <Card>
-              <CardHeader>
-                <h2 className="text-base font-bold text-ink">Usuarios de la organización</h2>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div><h2 className="text-base font-bold text-ink">Usuarios de la organización</h2><p className="mt-1 text-xs text-slate-500">Empleados con cuenta y permisos en Smart Source.</p></div>
+                {canManage ? <Button type="button" size="sm" onClick={() => setShowUserForm(true)}><Plus className="h-4 w-4" />Nuevo empleado</Button> : null}
               </CardHeader>
               <CardContent className="space-y-2">
                 {users.map((user) => (
                   <div key={user.id} className="grid gap-3 rounded-lg border border-border p-3 md:grid-cols-[1fr_180px_90px] md:items-center">
                     <div>
-                      <p className="text-[13px] font-bold text-ink">{user.name}</p>
+                      <p className="text-[13px] font-bold text-ink">{user.name} {user.id === currentUser?.id ? <Badge tone="green">Tu cuenta</Badge> : null}</p>
                       <p className="mt-1 text-xs text-slate-500">{user.email}</p>
                     </div>
-                    {canManage && !["SYSTEM_ADMIN", "OWNER"].includes(user.role) ? (
+                    {canManage && user.id !== currentUser?.id && !["SYSTEM_ADMIN", "OWNER"].includes(user.role) ? (
                       <select className="h-9 rounded-lg border border-border bg-white px-2 text-xs font-semibold" value={user.role} onChange={(event) => roleMutation.mutate({ userId: user.id, role: event.target.value })} disabled={roleMutation.isPending}>
                         {roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
-                    ) : <Badge tone={user.role === "ADMIN" || user.role === "SYSTEM_ADMIN" ? "blue" : "slate"}>{user.role}</Badge>}
+                    ) : <Badge tone={["OWNER", "ADMIN", "SYSTEM_ADMIN"].includes(user.role) ? "blue" : "slate"}>{roleLabel(user.role)}</Badge>}
                     <Badge tone={user.isActive ? "green" : "amber"}>{user.isActive ? "Activo" : "Inactivo"}</Badge>
                   </div>
                 ))}
@@ -210,4 +249,10 @@ function formatDate(value: string) {
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("es-DO", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function roleLabel(role: string) {
+  if (role === "OWNER") return "Propietario";
+  if (role === "SYSTEM_ADMIN") return "Administrador del sistema";
+  return roleOptions.find((option) => option.value === role)?.label ?? role;
 }

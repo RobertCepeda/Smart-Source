@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { authenticate, requirePermission } from "../auth/auth.middleware";
 import { validate } from "../../middlewares/validate";
-import { auditQuerySchema, organizationUserParamsSchema, updateOrganizationUserSchema } from "./organization.schema";
-import { getOrganizationWorkspace, listAuditLogs, updateOrganizationUser } from "./organization.service";
+import { auditQuerySchema, createOrganizationUserSchema, organizationUserParamsSchema, updateOrganizationUserSchema } from "./organization.schema";
+import { createOrganizationUser, getOrganizationWorkspace, listAuditLogs, updateOrganizationUser } from "./organization.service";
 
 export const organizationRouter = Router();
 
@@ -30,6 +30,15 @@ organizationRouter.get("/audit", requirePermission("organization:manage"), valid
   try {
     const { limit } = auditQuerySchema.parse(req.query);
     res.json({ logs: await listAuditLogs(organizationId(req), limit) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+organizationRouter.post("/users", requirePermission("organization:manage"), validate({ body: createOrganizationUserSchema }), async (req, res, next) => {
+  try {
+    const input = createOrganizationUserSchema.parse(req.body);
+    res.status(201).json({ user: await createOrganizationUser(organizationId(req), req.user!.id, input) });
   } catch (error) {
     next(error);
   }

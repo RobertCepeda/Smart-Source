@@ -71,7 +71,14 @@ export function CostCenters() {
           </CardHeader>
           <CardContent>
             <form className="grid gap-3 md:grid-cols-[180px_1fr_1.3fr_auto]" onSubmit={(event) => { event.preventDefault(); saveMutation.mutate(); }}>
-              <Input placeholder="Código, ej. CC-204" value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} required />
+              <Input
+                placeholder="Código, ej. CC-204"
+                value={form.code}
+                onChange={(event) => setForm((current) => ({ ...current, code: event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "") }))}
+                pattern="[A-Z]+-[0-9]+"
+                title="Usa letras, guion y números; por ejemplo CC-204."
+                required
+              />
               <Input placeholder="Nombre" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required />
               <Input placeholder="Descripción opcional" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
               <Button type="submit" disabled={saveMutation.isPending}><Save className="h-4 w-4" />Guardar</Button>

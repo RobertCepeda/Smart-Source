@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownToLine, ArrowLeftRight, Boxes, MapPin, PackageCheck, Plus, Warehouse as WarehouseIcon } from "lucide-react";
+import { ArrowDownToLine, ArrowLeftRight, Boxes, CheckCircle2, MapPin, PackageCheck, Plus, Warehouse as WarehouseIcon } from "lucide-react";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -11,9 +11,11 @@ import {
   createInventoryMovementRequest,
   createInventoryTransferRequest,
   createWarehouseRequest,
+  getOrganizationWorkspaceRequest,
   listCatalogItemsRequest,
   listInventoryTransfersRequest,
   listWarehousesRequest,
+  receiveInventoryTransferRequest,
 } from "../services/api";
 
 type ViewMode = "inventory" | "transfers";
@@ -26,12 +28,13 @@ export function Warehouses() {
   const [showCreate, setShowCreate] = useState(false);
   const [warehouseForm, setWarehouseForm] = useState({ name: "", code: "", type: "GENERAL" as "GENERAL" | "PROJECT", location: "" });
   const [movementForm, setMovementForm] = useState({ itemId: "", type: "SALIDA" as "SALIDA" | "AJUSTE", quantity: "", reference: "", notes: "" });
-  const [transferForm, setTransferForm] = useState({ originWarehouseId: "", destinationWarehouseId: "", itemId: "", quantity: "", notes: "" });
+  const [transferForm, setTransferForm] = useState({ originWarehouseId: "", destinationWarehouseId: "", itemId: "", driverId: "", quantity: "", notes: "" });
   const [notice, setNotice] = useState<string | null>(null);
 
   const warehousesQuery = useQuery({ queryKey: ["warehouses"], queryFn: () => listWarehousesRequest(token!), enabled: Boolean(token) });
   const itemsQuery = useQuery({ queryKey: ["catalog-items", "warehouse"], queryFn: () => listCatalogItemsRequest(token!), enabled: Boolean(token) });
-  const transfersQuery = useQuery({ queryKey: ["inventory-transfers"], queryFn: () => listInventoryTransfersRequest(token!), enabled: Boolean(token) });
+  const transfersQuery = useQuery({ queryKey: ["inventory-transfers"], queryFn: () => listInventoryTransfersRequest(token!), enabled: Boolean(token), refetchInterval: 5000 });
+  const organizationQuery = useQuery({ queryKey: ["organization-workspace", "warehouse-drivers"], queryFn: () => getOrganizationWorkspaceRequest(token!), enabled: Boolean(token) });
   const warehouses = useMemo(() => warehousesQuery.data?.warehouses ?? [], [warehousesQuery.data?.warehouses]);
   const selected = warehouses.find((warehouse) => warehouse.id === selectedId) ?? warehouses[0];
   const origin = warehouses.find((warehouse) => warehouse.id === transferForm.originWarehouseId) ?? null;
@@ -41,7 +44,9 @@ export function Warehouses() {
     if (!transferForm.originWarehouseId && warehouses[0]) {
       setTransferForm((current) => ({ ...current, originWarehouseId: warehouses[0].id, destinationWarehouseId: warehouses[1]?.id ?? "" }));
     }
-  }, [selectedId, transferForm.originWarehouseId, warehouses]);
+    const firstDriver = organizationQuery.data?.users.find((entry) => entry.isActive);
+    if (!transferForm.driverId && firstDriver) setTransferForm((current) => ({ ...current, driverId: firstDriver.id }));
+  }, [organizationQuery.data?.users, selectedId, transferForm.driverId, transferForm.originWarehouseId, warehouses]);
 
   const totals = useMemo(() => ({
     warehouses: warehouses.length,
@@ -73,10 +78,18 @@ export function Warehouses() {
     mutationFn: () => createInventoryTransferRequest(token!, { ...transferForm, quantity: Number(transferForm.quantity) }),
     onSuccess: async () => {
       setTransferForm((current) => ({ ...current, itemId: "", quantity: "", notes: "" }));
-      setNotice("Transferencia completada y registrada en ambos almacenes.");
+      setNotice("Transferencia despachada. El destino debe confirmar la entrada.");
       await Promise.all([queryClient.invalidateQueries({ queryKey: ["warehouses"] }), queryClient.invalidateQueries({ queryKey: ["inventory-transfers"] })]);
     },
     onError: (error) => setNotice(error instanceof Error ? error.message : "No se pudo realizar la transferencia."),
+  });
+  const receiveTransferMutation = useMutation({
+    mutationFn: (transferId: string) => receiveInventoryTransferRequest(token!, transferId),
+    onSuccess: async () => {
+      setNotice("Material recibido e ingresado al almacén de destino.");
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["warehouses"] }), queryClient.invalidateQueries({ queryKey: ["inventory-transfers"] })]);
+    },
+    onError: (error) => setNotice(error instanceof Error ? error.message : "No se pudo confirmar la recepción."),
   });
 
   return (
@@ -113,10 +126,10 @@ export function Warehouses() {
       ) : (
         <div className="space-y-4">
           <Card>
-            <CardHeader><h2 className="text-sm font-bold text-ink">Transferir materiales</h2><p className="mt-1 text-xs text-slate-500">La salida y la entrada quedarán registradas automáticamente.</p></CardHeader>
-            <CardContent><form className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_130px_auto]" onSubmit={(event) => { event.preventDefault(); transferMutation.mutate(); }}><SelectField label="Origen" value={transferForm.originWarehouseId} onChange={(value) => setTransferForm((current) => ({ ...current, originWarehouseId: value, itemId: "", destinationWarehouseId: current.destinationWarehouseId === value ? "" : current.destinationWarehouseId }))}><option value="">Selecciona origen</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} - {warehouse.name}</option>)}</SelectField><SelectField label="Destino" value={transferForm.destinationWarehouseId} onChange={(value) => setTransferForm((current) => ({ ...current, destinationWarehouseId: value }))}><option value="">Selecciona destino</option>{warehouses.filter((warehouse) => warehouse.id !== transferForm.originWarehouseId).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} - {warehouse.name}</option>)}</SelectField><SelectField label="Artículo disponible" value={transferForm.itemId} onChange={(value) => setTransferForm((current) => ({ ...current, itemId: value }))}><option value="">Selecciona artículo</option>{(origin?.balances ?? []).map((balance) => <option key={balance.itemId} value={balance.itemId}>{balance.item.name} · {Number(balance.quantity).toLocaleString("es-DO")} disp.</option>)}</SelectField><label><span className="mb-1.5 block text-xs font-semibold text-slate-600">Cantidad</span><Input type="number" min="0.01" step="0.01" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} required /></label><div className="flex items-end"><Button type="submit" className="w-full" disabled={transferMutation.isPending || warehouses.length < 2}><ArrowLeftRight className="h-4 w-4" />Transferir</Button></div></form><Input className="mt-3" placeholder="Nota opcional de la transferencia" value={transferForm.notes} onChange={(event) => setTransferForm((current) => ({ ...current, notes: event.target.value }))} /></CardContent>
+            <CardHeader><h2 className="text-sm font-bold text-ink">Transferir materiales</h2><p className="mt-1 text-xs text-slate-500">Se descuenta del origen al despachar y se suma al destino cuando confirman la recepción.</p></CardHeader>
+            <CardContent><form className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_120px_auto]" onSubmit={(event) => { event.preventDefault(); transferMutation.mutate(); }}><SelectField label="Origen" value={transferForm.originWarehouseId} onChange={(value) => setTransferForm((current) => ({ ...current, originWarehouseId: value, itemId: "", destinationWarehouseId: current.destinationWarehouseId === value ? "" : current.destinationWarehouseId }))}><option value="">Selecciona origen</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} - {warehouse.name}</option>)}</SelectField><SelectField label="Destino" value={transferForm.destinationWarehouseId} onChange={(value) => setTransferForm((current) => ({ ...current, destinationWarehouseId: value }))}><option value="">Selecciona destino</option>{warehouses.filter((warehouse) => warehouse.id !== transferForm.originWarehouseId).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} - {warehouse.name}</option>)}</SelectField><SelectField label="Insumo disponible" value={transferForm.itemId} onChange={(value) => setTransferForm((current) => ({ ...current, itemId: value }))}><option value="">Selecciona insumo</option>{(origin?.balances ?? []).map((balance) => <option key={balance.itemId} value={balance.itemId}>{balance.item.name} · {Number(balance.quantity).toLocaleString("es-DO")} disp.</option>)}</SelectField><SelectField label="Chofer responsable" value={transferForm.driverId} onChange={(value) => setTransferForm((current) => ({ ...current, driverId: value }))}><option value="">Selecciona un empleado</option>{(organizationQuery.data?.users ?? []).filter((entry) => entry.isActive).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</SelectField><label><span className="mb-1.5 block text-xs font-semibold text-slate-600">Cantidad</span><Input type="number" min="0.01" step="0.01" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} required /></label><div className="flex items-end"><Button type="submit" className="w-full" disabled={transferMutation.isPending || warehouses.length < 2}><ArrowLeftRight className="h-4 w-4" />Despachar</Button></div></form><Input className="mt-3" placeholder="Nota opcional de la transferencia" value={transferForm.notes} onChange={(event) => setTransferForm((current) => ({ ...current, notes: event.target.value }))} /></CardContent>
           </Card>
-          <TransfersTable transfers={transfersQuery.data?.transfers ?? []} />
+          <TransfersTable transfers={transfersQuery.data?.transfers ?? []} isReceiving={receiveTransferMutation.isPending} onReceive={(id) => receiveTransferMutation.mutate(id)} />
         </div>
       )}
     </div>
@@ -135,8 +148,8 @@ function MovementsCard({ movements }: { movements: Awaited<ReturnType<typeof lis
   return <Card><CardHeader><h2 className="text-sm font-bold text-ink">Últimos movimientos</h2></CardHeader><CardContent className="space-y-2">{movements.map((movement) => <div key={movement.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5"><div><p className="text-[13px] font-semibold text-ink">{movement.item.name}</p><p className="mt-1 text-xs text-slate-500">{movement.reference || movement.order?.number || "Movimiento manual"} · {new Date(movement.createdAt).toLocaleString("es-DO")}</p></div><Badge tone={movement.type.includes("ENTRADA") ? "green" : movement.type.includes("SALIDA") ? "amber" : "blue"}>{movementLabel(movement.type)} · {movement.quantity}</Badge></div>)}{!movements.length ? <p className="text-[13px] text-slate-500">Sin movimientos registrados.</p> : null}</CardContent></Card>;
 }
 
-function TransfersTable({ transfers }: { transfers: Awaited<ReturnType<typeof listInventoryTransfersRequest>>["transfers"] }) {
-  return <Card><CardHeader><h2 className="text-sm font-bold text-ink">Historial de transferencias</h2></CardHeader><CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[13px]"><thead className="border-y border-border bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Artículo</th><th className="px-4 py-3">Origen</th><th className="px-4 py-3">Destino</th><th className="px-4 py-3 text-right">Cantidad</th></tr></thead><tbody className="divide-y divide-border">{transfers.map((transfer) => <tr key={transfer.id}><td className="px-4 py-3 text-slate-500">{new Date(transfer.createdAt).toLocaleString("es-DO")}</td><td className="px-4 py-3 font-semibold text-ink">{transfer.item.name}</td><td className="px-4 py-3">{transfer.originWarehouse.code} · {transfer.originWarehouse.name}</td><td className="px-4 py-3">{transfer.destinationWarehouse.code} · {transfer.destinationWarehouse.name}</td><td className="px-4 py-3 text-right font-bold text-ink">{Number(transfer.quantity).toLocaleString("es-DO")} {transfer.unit ?? ""}</td></tr>)}{!transfers.length ? <tr><td colSpan={5} className="p-8 text-center text-slate-500">Aún no hay transferencias registradas.</td></tr> : null}</tbody></table></div></CardContent></Card>;
+function TransfersTable({ transfers, isReceiving, onReceive }: { transfers: Awaited<ReturnType<typeof listInventoryTransfersRequest>>["transfers"]; isReceiving: boolean; onReceive: (id: string) => void }) {
+  return <Card><CardHeader><h2 className="text-sm font-bold text-ink">Transferencias y recepción</h2></CardHeader><CardContent className="p-0"><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-[13px]"><thead className="border-y border-border bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-4 py-3">Fecha</th><th className="px-4 py-3">Insumo</th><th className="px-4 py-3">Ruta</th><th className="px-4 py-3">Creó</th><th className="px-4 py-3">Chofer</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3 text-right">Cantidad</th><th className="px-4 py-3 text-right">Acción</th></tr></thead><tbody className="divide-y divide-border">{transfers.map((transfer) => <tr key={transfer.id}><td className="px-4 py-3 text-slate-500">{new Date(transfer.createdAt).toLocaleString("es-DO")}</td><td className="px-4 py-3 font-semibold text-ink">{transfer.item.name}</td><td className="px-4 py-3">{transfer.originWarehouse.code} → {transfer.destinationWarehouse.code}</td><td className="px-4 py-3 text-slate-600">{transfer.createdBy?.name ?? "Sistema"}</td><td className="px-4 py-3 text-slate-600">{transfer.driver?.name ?? "No registrado"}</td><td className="px-4 py-3"><Badge tone={transfer.status === "RECIBIDA" ? "green" : "amber"}>{transfer.status === "RECIBIDA" ? "Recibida" : "En tránsito"}</Badge>{transfer.receivedBy ? <p className="mt-1 text-[11px] text-slate-500">por {transfer.receivedBy.name}</p> : null}</td><td className="px-4 py-3 text-right font-bold text-ink">{Number(transfer.quantity).toLocaleString("es-DO")} {transfer.unit ?? ""}</td><td className="px-4 py-3 text-right">{transfer.status === "PENDIENTE" ? <Button type="button" size="sm" disabled={isReceiving} onClick={() => onReceive(transfer.id)}><CheckCircle2 className="h-4 w-4" />Dar entrada</Button> : <span className="text-xs text-slate-500">Completada</span>}</td></tr>)}{!transfers.length ? <tr><td colSpan={8} className="p-8 text-center text-slate-500">Aún no hay transferencias registradas.</td></tr> : null}</tbody></table></div></CardContent></Card>;
 }
 
 function SelectField({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) {

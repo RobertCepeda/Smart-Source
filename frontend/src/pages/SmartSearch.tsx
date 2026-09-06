@@ -7,6 +7,7 @@ import {
   Building2,
   FolderTree,
   PackageSearch,
+  Plus,
   Search,
   Tags,
   type LucideIcon,
@@ -18,7 +19,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { useAuth } from "../contexts/AuthContext";
-import { smartSearchRequest, type SmartSearchResult } from "../services/api";
+import { listCatalogItemsRequest, smartSearchRequest, type SmartSearchResult } from "../services/api";
 
 const quickSearches = ["cemento", "Santiago", "crédito", "oficina"];
 
@@ -53,18 +54,25 @@ export function SmartSearch() {
     queryFn: () => smartSearchRequest(token!, debouncedQuery),
     enabled: Boolean(token && debouncedQuery.length >= 2),
   });
+  const catalogQuery = useQuery({
+    queryKey: ["catalog-items", "insumos", debouncedQuery],
+    queryFn: () => listCatalogItemsRequest(token!, debouncedQuery.length >= 2 ? { search: debouncedQuery } : {}),
+    enabled: Boolean(token),
+  });
 
   const groups = useMemo(() => searchQuery.data?.groups ?? [], [searchQuery.data?.groups]);
   const visibleGroups = useMemo(() => groups.filter((group) => group.results.length), [groups]);
   const total = searchQuery.data?.total ?? 0;
   const isTooShort = query.trim().length > 0 && query.trim().length < 2;
+  const catalogItems = catalogQuery.data?.items ?? [];
 
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Módulo 3"
-        title="Búsqueda inteligente"
-        description="Encuentra suplidores, contactos, materiales, servicios, categorías, marcas y etiquetas desde un solo punto."
+        eyebrow="Catálogo"
+        title="Insumos"
+        description="Consulta los insumos registrados y busca cualquier dato de Smart Source desde un solo punto."
+        actions={<Link to="/catalog" className="inline-flex h-9 items-center gap-2 rounded-lg bg-ink px-3.5 text-[13px] font-bold text-white"><Plus className="h-4 w-4" />Crear insumo</Link>}
       />
 
       <Card>
@@ -89,6 +97,35 @@ export function SmartSearch() {
                 {item}
               </Button>
             ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-ink">Insumos registrados</h2>
+            <p className="mt-1 text-xs text-slate-500">{catalogItems.length} resultados del catálogo</p>
+          </div>
+          <PackageSearch className="h-4 w-4 text-brand-700" />
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-[13px]">
+              <thead className="border-y border-border bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-4 py-2.5">Insumo</th><th className="px-4 py-2.5">Clasificación</th><th className="px-4 py-2.5">Marca</th><th className="px-4 py-2.5">Unidad</th><th className="px-4 py-2.5 text-right">Suplidores</th></tr></thead>
+              <tbody className="divide-y divide-border">
+                {catalogItems.map((item) => (
+                  <tr key={item.id} className="transition hover:bg-slate-50">
+                    <td className="px-4 py-3"><Link to={`/catalog/${item.id}`} className="font-bold text-ink hover:text-brand-700">{item.name}</Link><p className="mt-1 text-xs text-slate-500">{item.type === "MATERIAL" ? "Insumo" : "Servicio"}</p></td>
+                    <td className="px-4 py-3 text-slate-600">{item.category?.name || "Sin categoría"}{item.subcategory ? ` / ${item.subcategory.name}` : ""}</td>
+                    <td className="px-4 py-3 text-slate-600">{item.brand?.name || "Sin marca"}</td>
+                    <td className="px-4 py-3 text-slate-600">{item.unit || "-"}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-ink">{item.supplierCount}</td>
+                  </tr>
+                ))}
+                {!catalogQuery.isLoading && !catalogItems.length ? <tr><td colSpan={5} className="p-6 text-center text-slate-500">No hay insumos con ese criterio.</td></tr> : null}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>
