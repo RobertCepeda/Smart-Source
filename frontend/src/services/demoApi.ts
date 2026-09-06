@@ -1420,7 +1420,8 @@ function itemMatches(item: CatalogItem, filters: CatalogFilters) {
     (!filters.type || item.type === filters.type) &&
     (!filters.categoryId || item.categoryId === filters.categoryId) &&
     (!filters.subcategoryId || item.subcategoryId === filters.subcategoryId) &&
-    (!filters.brandId || item.brandId === filters.brandId)
+    (!filters.brandId || item.brandId === filters.brandId) &&
+    (!filters.unit || item.unit?.toLowerCase() === filters.unit.toLowerCase())
   );
 }
 

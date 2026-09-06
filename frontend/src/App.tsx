@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { PublicRoute } from "./components/auth/PublicRoute";
 import { AppShell } from "./components/layout/AppShell";
 import { AuthProvider } from "./contexts/AuthContext";
+import { AccessManagement } from "./pages/AccessManagement";
 import { AiConsult } from "./pages/AiConsult";
 import { Catalog } from "./pages/Catalog";
 import { CatalogItemDetail } from "./pages/CatalogItemDetail";
@@ -74,6 +75,7 @@ function App() {
             <Route path="/suppliers/:id/edit" element={<Registration />} />
             <Route path="/suppliers/:id" element={<SupplierDetail />} />
             <Route path="/organizations" element={<Organizations />} />
+            <Route path="/access" element={<AccessManagement />} />
             <Route path="/cost-centers" element={<CostCenters />} />
             <Route path="/catalog" element={<Catalog />} />
             <Route path="/catalog/:id" element={<CatalogItemDetail />} />

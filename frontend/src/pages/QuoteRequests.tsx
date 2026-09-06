@@ -690,7 +690,7 @@ function CreateQuoteRequestPanel({
               <span className="mb-1.5 block text-[13px] font-semibold text-slate-700">Solicitante</span>
               <select className="h-9 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink" value={requesterName} onChange={(event) => onRequesterNameChange(event.target.value)} required>
                 <option value="">Selecciona un solicitante</option>
-                {requesters.map((requester) => <option key={requester.id} value={requester.name}>{requester.name} · {requester.email}</option>)}
+                {requesters.map((requester) => <option key={requester.id} value={requester.name}>{requester.name}</option>)}
               </select>
             </label>
             <label className="block">

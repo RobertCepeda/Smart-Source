@@ -37,6 +37,7 @@ export function AiConsult() {
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const chatsQuery = useQuery({
     queryKey: ["ai-chats"],
@@ -180,6 +181,7 @@ export function AiConsult() {
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    setIsDragging(false);
     void uploadFiles(event.dataTransfer.files);
   }
 
@@ -299,8 +301,10 @@ export function AiConsult() {
 
           <CardContent className="flex min-h-[650px] flex-col p-0">
             <div
-              className="border-b border-border bg-white p-3"
-              onDragOver={(event) => event.preventDefault()}
+              className={cn("border-b border-dashed p-3 transition", isDragging ? "border-brand-500 bg-brand-50" : "border-border bg-white")}
+              onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDragging(false); }}
               onDrop={onDrop}
             >
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -310,7 +314,7 @@ export function AiConsult() {
                   </span>
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-ink">Archivos del chat</p>
-                    <p className="text-[11px] text-slate-500">Cada chat mantiene sus propios documentos e historial.</p>
+                    <p className="text-[11px] text-slate-500">Arrastra aquí tus archivos o usa Agregar. Cada chat conserva sus documentos.</p>
                   </div>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>

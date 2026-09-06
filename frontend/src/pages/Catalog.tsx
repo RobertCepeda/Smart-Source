@@ -221,7 +221,7 @@ export function Catalog() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <h2 className="text-base font-bold text-ink">Clasificación del catálogo</h2>
+              <h2 className="text-base font-bold text-ink">Insumos</h2>
             </CardHeader>
             <CardContent className="grid gap-4 lg:grid-cols-3">
               <form

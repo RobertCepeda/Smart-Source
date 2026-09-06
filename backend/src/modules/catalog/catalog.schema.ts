@@ -12,6 +12,7 @@ export const listItemsQuerySchema = z.object({
   categoryId: optionalString,
   subcategoryId: optionalString,
   brandId: optionalString,
+  unit: optionalString,
 });
 
 export const createItemSchema = z.object({

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Calculator, CheckCircle2, ClipboardList, History, Plus, Send, Trash2, XCircle } from "lucide-react";
+import { Activity, Calculator, CheckCircle2, ClipboardList, History, Plus, Send, Trash2, Warehouse as WarehouseIcon, XCircle } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Badge } from "../components/ui/badge";
@@ -520,13 +520,20 @@ function OrderCard({
             {new Date(order.issueDate).toLocaleDateString()} - {order.lines.length} líneas
           </p>
           {order.costCenter ? <p className="mt-1 text-xs font-semibold text-brand-700">Centro de costo: {order.costCenter}</p> : null}
-          {order.warehouse ? <p className="mt-1 text-xs font-semibold text-slate-600">Destino: {order.warehouse.name} · {order.warehouse.code}</p> : null}
         </div>
         <div className="text-left sm:text-right">
           <p className="text-base font-bold text-ink">{formatMoney(Number(order.total), order.currency)}</p>
           <p className="mt-1 text-xs text-slate-500">
             ITBIS {formatMoney(Number(order.tax), order.currency)}
           </p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 rounded-lg border border-border bg-slate-50 px-3 py-2">
+        <WarehouseIcon className="h-4 w-4 shrink-0 text-brand-700" />
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Almacén de destino</p>
+          <p className="truncate text-xs font-semibold text-ink">{order.warehouse ? `${order.warehouse.name} · ${order.warehouse.code}` : requiresWarehouse ? "Pendiente de asignación" : "No aplica para esta orden"}</p>
         </div>
       </div>
 

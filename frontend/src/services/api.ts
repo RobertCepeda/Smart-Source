@@ -235,6 +235,7 @@ export type CatalogFilters = {
   categoryId?: string;
   subcategoryId?: string;
   brandId?: string;
+  unit?: string;
 };
 
 export type SupportTicket = {

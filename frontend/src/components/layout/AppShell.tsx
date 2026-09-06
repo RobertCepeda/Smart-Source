@@ -17,6 +17,7 @@ import {
   PackageSearch,
   Plus,
   Search,
+  ShieldCheck,
   Settings,
   ShoppingCart,
   Warehouse,
@@ -45,13 +46,14 @@ const navigationGroups: NavigationGroup[] = [
     items: [
       { label: "Suplidores", path: "/suppliers", icon: Building2 },
       { label: "Creación de catálogo", path: "/catalog", icon: PackageSearch },
-      { label: "Insumos", path: "/search", icon: Search },
+      { label: "Búsqueda", path: "/search", icon: Search },
     ],
   },
   {
     label: "Empresa",
     items: [
       { label: "Organizaciones", path: "/organizations", icon: Network },
+      { label: "Accesos", path: "/access", icon: ShieldCheck },
       { label: "Centros de costo", path: "/cost-centers", icon: CircleDollarSign },
       { label: "Centro de Atención", path: "/support", icon: Headphones },
     ],

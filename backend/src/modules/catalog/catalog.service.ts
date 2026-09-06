@@ -155,6 +155,7 @@ export async function listItems(organizationId: string, query: ListItemsQuery) {
       ...(cleanString(query.categoryId) ? { categoryId: query.categoryId } : {}),
       ...(cleanString(query.subcategoryId) ? { subcategoryId: query.subcategoryId } : {}),
       ...(cleanString(query.brandId) ? { brandId: query.brandId } : {}),
+      ...(cleanString(query.unit) ? { unit: { equals: query.unit, mode: "insensitive" as const } } : {}),
       ...(search
         ? {
             OR: [
