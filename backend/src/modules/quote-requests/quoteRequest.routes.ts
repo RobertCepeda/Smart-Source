@@ -43,7 +43,7 @@ function organizationId(req: Express.Request) {
 
 function authUserId(req: Express.Request) {
   if (!req.user?.id) {
-    const error = new Error("Necesitas iniciar sesion para guardar borradores.");
+    const error = new Error("Necesitas iniciar sesión para guardar borradores.");
     (error as Error & { status: number }).status = 401;
     throw error;
   }

@@ -1,20 +1,13 @@
 {
   "hosting": {
-    "site": "smartsource",
+    "site": "smart-source-rd-2026",
     "public": "frontend/dist",
     "ignore": [
-      "firebase.json",
+      "firebase.demo.json",
       "**/.*",
       "**/node_modules/**"
     ],
     "rewrites": [
-      {
-        "source": "/api/**",
-        "run": {
-          "serviceId": "smart-source-api",
-          "region": "us-east1"
-        }
-      },
       {
         "source": "**",
         "destination": "/index.html"

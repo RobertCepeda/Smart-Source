@@ -5,6 +5,7 @@ dist/
 **/dist/
 coverage/
 .vite/
+.firebase/
 
 .env
 .env.*

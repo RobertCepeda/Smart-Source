@@ -29,7 +29,7 @@ export function AdminLogin() {
 
       navigate("/admin", { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No pudimos iniciar sesion.");
+      setMessage(error instanceof Error ? error.message : "No pudimos iniciar sesión.");
     } finally {
       setSubmitting(false);
     }

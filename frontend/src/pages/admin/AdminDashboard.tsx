@@ -47,7 +47,7 @@ export function AdminDashboard() {
           </div>
           <Button type="button" variant="outline" onClick={logout}>
             <LogOut className="h-4 w-4" />
-            Cerrar sesion
+            Cerrar sesión
           </Button>
         </header>
 

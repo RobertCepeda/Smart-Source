@@ -27,7 +27,7 @@ export function Login() {
       await login({ email, password });
       navigate(from, { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo iniciar sesion.");
+      setMessage(error instanceof Error ? error.message : "No se pudo iniciar sesión.");
     } finally {
       setSubmitting(false);
     }
@@ -42,7 +42,7 @@ export function Login() {
       <div>
         <div className="mb-6">
           <p className="text-[13px] font-semibold text-brand-700">Acceso seguro</p>
-          <h2 className="mt-2 text-xl font-bold text-ink">Iniciar sesion</h2>
+          <h2 className="mt-2 text-xl font-bold text-ink">Iniciar sesión</h2>
           <p className="mt-2 text-[13px] leading-6 text-slate-600">Usa tu cuenta para continuar trabajando en Smart Source.</p>
         </div>
 
