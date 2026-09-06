@@ -4,7 +4,7 @@ export const isDemoMode = import.meta.env.MODE === "github" || import.meta.env.V
 export const DEMO_TOKEN = demoToken;
 export const DEMO_USER = demoUser;
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:4000/api" : "/api");
 
 export type HealthResponse = {
   app: string;

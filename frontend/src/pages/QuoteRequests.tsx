@@ -135,6 +135,7 @@ export function QuoteRequests() {
   const [statusFilter, setStatusFilter] = useState<QuoteRequestStatus | "">("");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const canAssignAnotherRequester = ["OWNER", "ADMIN", "SYSTEM_ADMIN"].includes(user?.role ?? "");
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
   const [draftWasRestored, setDraftWasRestored] = useState(false);
@@ -515,7 +516,7 @@ export function QuoteRequests() {
           catalogItems={catalogItems}
           units={units}
           costCenters={(costCentersQuery.data?.costCenters ?? []).filter((entry) => entry.isActive)}
-          requesters={(organizationQuery.data?.users ?? []).filter((entry) => entry.isActive)}
+          requesters={(organizationQuery.data?.users ?? []).filter((entry) => entry.isActive && (canAssignAnotherRequester || entry.id === user?.id))}
           project={project}
           costCenterId={costCenterId}
           requesterName={requesterName}
